@@ -46,6 +46,7 @@ type SpriteData = {
 
 type Category = "all" | "building" | "equipment" | "redstone" | "misc" | "special";
 type Tier = 1 | 2 | 3 | 4 | 5;
+type HotbarStack = { id: string; count: number };
 
 const catalog = catalogJson as Catalog;
 const spriteData = spriteJson as unknown as SpriteData;
@@ -60,6 +61,8 @@ type SavedProgress = {
   equippedWeapon?: string;
   equippedArmor?: string;
   battleWins?: Record<string, number>;
+  craftingHotbar?: (HotbarStack | null)[];
+  hotbarSelection?: number;
 };
 const CATEGORY_INFO: { id: Category; icon: string; label: string; en: string }[] = [
   { id: "all", icon: "▦", label: "全部", en: "All Recipes" },
@@ -97,6 +100,38 @@ function readSavedProgress(): SavedProgress {
 function writeSavedProgress(patch: Partial<SavedProgress>) {
   const current = readSavedProgress();
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, ...patch }));
+}
+
+function emptyHotbar() {
+  return Array<HotbarStack | null>(9).fill(null);
+}
+
+function normalizeHotbar(value: SavedProgress["craftingHotbar"]) {
+  const slots = emptyHotbar();
+  if (!Array.isArray(value)) return slots;
+  value.slice(0, 9).forEach((stack, index) => {
+    if (!stack || typeof stack.id !== "string" || !stack.id) return;
+    slots[index] = { id: stack.id, count: Math.max(1, Math.floor(Number(stack.count) || 1)) };
+  });
+  return slots;
+}
+
+function addCraftedStack(hotbar: (HotbarStack | null)[], id: string, count: number) {
+  const slots = normalizeHotbar(hotbar);
+  const existingIndex = slots.findIndex((stack) => stack?.id === id);
+  if (existingIndex >= 0) {
+    const current = slots[existingIndex] as HotbarStack;
+    slots[existingIndex] = { ...current, count: current.count + Math.max(1, count) };
+    return { slots, selectedIndex: existingIndex };
+  }
+  const emptyIndex = slots.findIndex((stack) => stack === null);
+  if (emptyIndex >= 0) {
+    slots[emptyIndex] = { id, count: Math.max(1, count) };
+    return { slots, selectedIndex: emptyIndex };
+  }
+  slots.shift();
+  slots.push({ id, count: Math.max(1, count) });
+  return { slots, selectedIndex: 8 };
 }
 
 function allMissionRecipeIds() {
@@ -327,6 +362,13 @@ function WorldScene({ dimmed = false }: { dimmed?: boolean }) {
 function WorldView({ onOpen, onBattle }: { onOpen: () => void; onBattle: () => void }) {
   const [swinging, setSwinging] = useState(false);
   const [hits, setHits] = useState(0);
+  const savedHotbar = useMemo(() => {
+    const saved = readSavedProgress();
+    return {
+      slots: normalizeHotbar(saved.craftingHotbar),
+      selectedIndex: Math.min(8, Math.max(0, saved.hotbarSelection ?? 0)),
+    };
+  }, []);
 
   function hitTable() {
     if (swinging) return;
@@ -379,8 +421,11 @@ function WorldView({ onOpen, onBattle }: { onOpen: () => void; onBattle: () => v
       <div className="survival-hud">
         <div className="bars"><span className="hearts">♥♥♥♥♥♥♥♥♥♥</span><span className="hunger">◆◆◆◆◆◆◆◆◆◆</span></div>
         <div className="hotbar">
-          {["wooden_pickaxe", "oak_planks", "stick", "apple", "torch", null, null, null, "crafting_table"].map((id, index) => (
-            <span key={index} className={index === 8 ? "selected" : ""}>{id && <Sprite id={id} size={38} />}{id === "oak_planks" && <b>16</b>}{id === "stick" && <b>8</b>}</span>
+          {savedHotbar.slots.map((stack, index) => (
+            <span key={index} className={stack && index === savedHotbar.selectedIndex ? "selected" : ""}>
+              {stack && <Sprite id={stack.id} size={38} />}
+              {stack && stack.count > 1 && <b>{stack.count}</b>}
+            </span>
           ))}
         </div>
         <div className="xp-bar"><i /><b>1</b></div>
@@ -441,15 +486,18 @@ function RecipeBook({
 }
 
 function CraftingGui({
-  recipe, matchedRecipe, grid, onDropMaterial, onRemove, onClear, onCraft, onOpenBook, bookOpen, craftedPulse,
+  recipe, matchedRecipe, grid, hotbar, hotbarSelection, onDropMaterial, onRemove, onClear, onCraft, onSelectHotbar, onOpenBook, bookOpen, craftedPulse,
 }: {
   recipe: Recipe;
   matchedRecipe: Recipe | null;
   grid: (string | null)[];
+  hotbar: (HotbarStack | null)[];
+  hotbarSelection: number;
   onDropMaterial: (targetIndex: number, id: string, sourceIndex: number | null) => void;
   onRemove: (index: number) => void;
   onClear: () => void;
   onCraft: (recipe: Recipe) => void;
+  onSelectHotbar: (index: number) => void;
   onOpenBook: () => void;
   bookOpen: boolean;
   craftedPulse: boolean;
@@ -462,7 +510,6 @@ function CraftingGui({
     const filler = ["oak_planks", "stick", "torch", "apple", "wooden_pickaxe"];
     return [...items, ...filler, ...Array(27).fill(null)].slice(0, 27) as (string | null)[];
   }, [recipe]);
-  const hotbar = ["wooden_pickaxe", "oak_planks", "stick", "apple", "torch", null, null, null, "crafting_table"] as (string | null)[];
 
   function startPointerDrag(event: ReactPointerEvent<HTMLButtonElement>, id: string, sourceIndex: number | null) {
     if (event.button !== 0) return;
@@ -546,7 +593,19 @@ function CraftingGui({
           ))}
         </div>
         <div className="player-hotbar">
-          {hotbar.map((id, index) => <span className="gui-slot" key={index}>{id && <Sprite id={id} size={45} />}</span>)}
+          {hotbar.map((stack, index) => (
+            <button
+              type="button"
+              className={`gui-slot hotbar-slot ${stack && index === hotbarSelection ? "selected" : ""} ${stack && craftedPulse && index === hotbarSelection ? "newest" : ""}`}
+              key={index}
+              onClick={() => stack && onSelectHotbar(index)}
+              disabled={!stack}
+              aria-label={stack ? `${index === hotbarSelection ? "当前选中，" : ""}快捷栏 ${index + 1}：${stack.id}，数量 ${stack.count}` : `空快捷栏格 ${index + 1}`}
+            >
+              {stack && <Sprite id={stack.id} size={45} />}
+              {stack && stack.count > 1 && <b>{stack.count}</b>}
+            </button>
+          ))}
         </div>
       </div>
       <div className="gui-help">
@@ -883,6 +942,7 @@ function BattleView({ onExit }: { onExit: () => void }) {
       completed: (latest.completed ?? []).filter((id) => !missionIds.has(id)),
       assessmentPassed: [], unlockedTier: 1, gearInventory: [],
       equippedWeapon: STARTER_WEAPON.uid, equippedArmor: STARTER_ARMOR.uid,
+      craftingHotbar: emptyHotbar(), hotbarSelection: 0,
     });
   }
 
@@ -1080,6 +1140,8 @@ function CraftingView({ onBack, onBattle }: { onBack: () => void; onBattle: () =
   const [assessmentPassed, setAssessmentPassed] = useState<string[]>([]);
   const [assessmentRecipe, setAssessmentRecipe] = useState<Recipe | null>(null);
   const [unlockNotice, setUnlockNotice] = useState<Tier | null>(null);
+  const [craftingHotbar, setCraftingHotbar] = useState<(HotbarStack | null)[]>(emptyHotbar);
+  const [hotbarSelection, setHotbarSelection] = useState(0);
 
   const selected = catalog.recipes.find((recipe) => recipe.id === selectedId || recipe.result.id === selectedId) ?? catalog.recipes[0];
   const matchedRecipe = useMemo(() => grid.some(Boolean) ? catalog.recipes.find((recipe) => tierForRecipe(recipe) <= unlockedTier && matchesRecipe(recipe, grid)) ?? null : null, [grid, unlockedTier]);
@@ -1101,12 +1163,14 @@ function CraftingView({ onBack, onBattle }: { onBack: () => void; onBattle: () =
       setCompleted(saved.completed ?? []);
       setUnlockedTier(Math.min(5, Math.max(1, saved.unlockedTier ?? 1)) as Tier);
       setAssessmentPassed(saved.assessmentPassed ?? []);
+      setCraftingHotbar(normalizeHotbar(saved.craftingHotbar));
+      setHotbarSelection(Math.min(8, Math.max(0, saved.hotbarSelection ?? 0)));
     } catch { /* progress should never block the game */ }
   }, []);
 
   useEffect(() => {
-    writeSavedProgress({ xp, craftCount, completed, unlockedTier, assessmentPassed });
-  }, [xp, craftCount, completed, unlockedTier, assessmentPassed]);
+    writeSavedProgress({ xp, craftCount, completed, unlockedTier, assessmentPassed, craftingHotbar, hotbarSelection });
+  }, [xp, craftCount, completed, unlockedTier, assessmentPassed, craftingHotbar, hotbarSelection]);
 
   useEffect(() => {
     if (assessmentRecipe) return;
@@ -1149,6 +1213,9 @@ function CraftingView({ onBack, onBattle }: { onBack: () => void; onBattle: () =
 
   function craftItem(recipe: Recipe) {
     playBlockTone("craft");
+    const nextHotbar = addCraftedStack(craftingHotbar, recipe.result.id, recipe.result.count);
+    setCraftingHotbar(nextHotbar.slots);
+    setHotbarSelection(nextHotbar.selectedIndex);
     setCraftedPulse(true);
     setCraftCount((value) => value + 1);
     setSelectedId(recipe.id);
@@ -1210,10 +1277,10 @@ function CraftingView({ onBack, onBattle }: { onBack: () => void; onBattle: () =
             onClose={() => setBookOpen(false)}
           />}
           <CraftingGui
-            recipe={selected} matchedRecipe={matchedRecipe} grid={grid} onDropMaterial={dropMaterial}
+            recipe={selected} matchedRecipe={matchedRecipe} grid={grid} hotbar={craftingHotbar} hotbarSelection={hotbarSelection} onDropMaterial={dropMaterial}
             onRemove={(index) => setGrid((current) => current.map((item, itemIndex) => itemIndex === index ? null : item))}
             onClear={() => setGrid(Array(9).fill(null))}
-            onCraft={craftItem} onOpenBook={() => setBookOpen((value) => !value)} bookOpen={bookOpen} craftedPulse={craftedPulse}
+            onCraft={craftItem} onSelectHotbar={setHotbarSelection} onOpenBook={() => setBookOpen((value) => !value)} bookOpen={bookOpen} craftedPulse={craftedPulse}
           />
           <EnglishPanel recipe={displayRecipe} completed={completed.includes(displayRecipe.id)} onFumi={() => setFumiOpen(true)} />
         </div>
