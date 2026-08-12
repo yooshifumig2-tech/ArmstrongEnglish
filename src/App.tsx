@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import catalogJson from "./data/recipes26_2.json";
 import spriteJson from "./data/sprites26_2.json";
 
@@ -102,6 +102,72 @@ function articleFor(name: string) {
   return /^[aeiou]/i.test(name) ? "an" : "a";
 }
 
+function accepts(ingredient: Ingredient | null, item: string | null) {
+  return ingredient === null ? item === null : item !== null && ingredient.alternatives.includes(item);
+}
+
+function matchesShaped(recipe: Recipe, grid: (string | null)[]) {
+  const occupied = recipe.slots.flatMap((slot, index) => slot ? [index] : []);
+  if (!occupied.length || grid.filter(Boolean).length !== occupied.length) return false;
+  const rows = occupied.map((index) => Math.floor(index / 3));
+  const columns = occupied.map((index) => index % 3);
+  const minRow = Math.min(...rows);
+  const maxRow = Math.max(...rows);
+  const minColumn = Math.min(...columns);
+  const maxColumn = Math.max(...columns);
+  const height = maxRow - minRow + 1;
+  const width = maxColumn - minColumn + 1;
+
+  for (let rowOffset = 0; rowOffset <= 3 - height; rowOffset += 1) {
+    for (let columnOffset = 0; columnOffset <= 3 - width; columnOffset += 1) {
+      for (const mirrored of [false, true]) {
+        let valid = true;
+        for (let row = 0; row < 3 && valid; row += 1) {
+          for (let column = 0; column < 3; column += 1) {
+            const patternRow = row - rowOffset;
+            const patternColumn = column - columnOffset;
+            let expected: Ingredient | null = null;
+            if (patternRow >= 0 && patternRow < height && patternColumn >= 0 && patternColumn < width) {
+              const sourceColumn = mirrored ? maxColumn - patternColumn : minColumn + patternColumn;
+              expected = recipe.slots[(minRow + patternRow) * 3 + sourceColumn];
+            }
+            if (!accepts(expected, grid[row * 3 + column])) {
+              valid = false;
+              break;
+            }
+          }
+        }
+        if (valid) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function matchesShapeless(recipe: Recipe, grid: (string | null)[]) {
+  const ingredients = recipe.slots.filter((slot): slot is Ingredient => Boolean(slot));
+  const items = grid.filter((item): item is string => Boolean(item));
+  if (!ingredients.length || ingredients.length !== items.length) return false;
+  const ordered = [...ingredients].sort((a, b) => a.alternatives.length - b.alternatives.length);
+  const used = Array(items.length).fill(false);
+  const search = (ingredientIndex: number): boolean => {
+    if (ingredientIndex === ordered.length) return true;
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+      if (used[itemIndex] || !ordered[ingredientIndex].alternatives.includes(items[itemIndex])) continue;
+      used[itemIndex] = true;
+      if (search(ingredientIndex + 1)) return true;
+      used[itemIndex] = false;
+    }
+    return false;
+  };
+  return search(0);
+}
+
+function matchesRecipe(recipe: Recipe, grid: (string | null)[]) {
+  if (recipe.dynamic) return false;
+  return recipe.type === "crafting_shaped" ? matchesShaped(recipe, grid) : matchesShapeless(recipe, grid);
+}
+
 function WorldScene({ dimmed = false }: { dimmed?: boolean }) {
   return (
     <div className={`world-scene ${dimmed ? "dimmed" : ""}`} aria-hidden={dimmed}>
@@ -111,6 +177,9 @@ function WorldScene({ dimmed = false }: { dimmed?: boolean }) {
       <div className="tree tree-right"><b /><span /><span /></div>
       <div className="ground-plane" />
       <div className="grass-edge" />
+      <div className="distant-plants plant-left"><i /><i /><i /><i /></div>
+      <div className="distant-plants plant-center"><i /><i /><i /></div>
+      <div className="distant-plants plant-right"><i /><i /><i /><i /><i /></div>
     </div>
   );
 }
@@ -144,9 +213,12 @@ function WorldView({ onOpen }: { onOpen: () => void }) {
       </div>
 
       <button className={`world-table ${hits ? "was-hit" : ""}`} onClick={hitTable} aria-label="点击合成台打开工作台">
-        <span className="cube-face cube-top" />
-        <span className="cube-face cube-front" />
-        <span className="cube-face cube-side" />
+        <span className="cube-body">
+          <i className="cube-face cube-top" />
+          <i className="cube-face cube-front" />
+          <i className="cube-face cube-side" />
+        </span>
+        <span className="cube-shadow" />
         <i className="target-label">CRAFTING TABLE<small>点击 / CLICK</small></i>
         {swinging && <span className="hit-particles"><i /><i /><i /><i /><i /></span>}
       </button>
@@ -215,27 +287,65 @@ function RecipeBook({
 }
 
 function CraftingGui({
-  recipe, grid, onIngredient, onRemove, onCraft, onOpenBook, bookOpen, craftedPulse,
+  recipe, matchedRecipe, grid, onDropMaterial, onRemove, onClear, onCraft, onOpenBook, bookOpen, craftedPulse,
 }: {
   recipe: Recipe;
+  matchedRecipe: Recipe | null;
   grid: (string | null)[];
-  onIngredient: (id: string) => void;
+  onDropMaterial: (targetIndex: number, id: string, sourceIndex: number | null) => void;
   onRemove: (index: number) => void;
-  onCraft: () => void;
+  onClear: () => void;
+  onCraft: (recipe: Recipe) => void;
   onOpenBook: () => void;
   bookOpen: boolean;
   craftedPulse: boolean;
 }) {
-  const matches = !recipe.dynamic && recipe.slots.every((slot, index) => {
-    if (!slot) return grid[index] === null;
-    return grid[index] !== null && slot.alternatives.includes(grid[index]!);
-  });
+  type PointerDrag = { id: string; sourceIndex: number | null; x: number; y: number };
+  const dragRef = useRef<PointerDrag | null>(null);
+  const [dragVisual, setDragVisual] = useState<PointerDrag | null>(null);
   const inventory = useMemo(() => {
     const items = recipe.slots.filter((slot): slot is Ingredient => Boolean(slot)).map((slot) => slot.id);
     const filler = ["oak_planks", "stick", "torch", "apple", "wooden_pickaxe"];
     return [...items, ...filler, ...Array(27).fill(null)].slice(0, 27) as (string | null)[];
   }, [recipe]);
   const hotbar = ["wooden_pickaxe", "oak_planks", "stick", "apple", "torch", null, null, null, "crafting_table"] as (string | null)[];
+
+  function startPointerDrag(event: ReactPointerEvent<HTMLButtonElement>, id: string, sourceIndex: number | null) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* pointer capture is an enhancement */ }
+    const next = { id, sourceIndex, x: event.clientX, y: event.clientY };
+    dragRef.current = next;
+    setDragVisual(next);
+  }
+
+  function movePointerDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!dragRef.current) return;
+    const next = { ...dragRef.current, x: event.clientX, y: event.clientY };
+    dragRef.current = next;
+    setDragVisual(next);
+  }
+
+  function finishPointerDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const active = dragRef.current;
+    if (!active) return;
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    const slot = target?.closest<HTMLElement>("[data-slot-index]");
+    if (slot) {
+      onDropMaterial(Number(slot.dataset.slotIndex), active.id, active.sourceIndex);
+    } else if (active.sourceIndex !== null && target?.closest(".inventory-return-zone")) {
+      onRemove(active.sourceIndex);
+    }
+    dragRef.current = null;
+    setDragVisual(null);
+  }
+
+  function cancelPointerDrag() {
+    dragRef.current = null;
+    setDragVisual(null);
+  }
+
+  const spokenMaterials = Array.from(new Set(recipe.slots.filter((slot): slot is Ingredient => Boolean(slot)).map((slot) => slot.name ?? slot.id))).join(", ");
 
   return (
     <section className="gui-column">
@@ -245,18 +355,37 @@ function CraftingGui({
         <span className="gui-label inventory-label">Inventory</span>
         <div className="input-grid">
           {grid.map((id, index) => (
-            <button key={index} className="gui-slot input-slot" onClick={() => id && onRemove(index)} aria-label={id ? `移除 ${id}` : `合成槽 ${index + 1}`}>
+            <button
+              key={index}
+              className="gui-slot input-slot"
+              data-slot-index={index}
+              onPointerDown={(event) => id && startPointerDrag(event, id, index)}
+              onPointerMove={movePointerDrag}
+              onPointerUp={finishPointerDrag}
+              onPointerCancel={cancelPointerDrag}
+              onContextMenu={(event) => { event.preventDefault(); if (id) onRemove(index); }}
+              aria-label={id ? `拖动 ${id}，当前在合成槽 ${index + 1}` : `可放置材料的合成槽 ${index + 1}`}
+            >
               {id && <Sprite id={id} size={45} />}
             </button>
           ))}
         </div>
         <span className="recipe-arrow">➜</span>
-        <button className={`gui-slot output-slot ${matches ? "ready" : ""} ${craftedPulse ? "crafted" : ""}`} onClick={() => matches && onCraft()} disabled={!matches} aria-label={matches ? `取出 ${recipe.result.name}` : "配方尚未完成"}>
-          {matches && <><Sprite id={recipe.result.id} size={45} />{recipe.result.count > 1 && <b>{recipe.result.count}</b>}</>}
+        <button className={`gui-slot output-slot ${matchedRecipe ? "ready" : ""} ${craftedPulse ? "crafted" : ""}`} onClick={() => matchedRecipe && onCraft(matchedRecipe)} disabled={!matchedRecipe} aria-label={matchedRecipe ? `取出 ${matchedRecipe.result.name}` : "配方尚未完成"}>
+          {matchedRecipe && <><Sprite id={matchedRecipe.result.id} size={45} />{matchedRecipe.result.count > 1 && <b>{matchedRecipe.result.count}</b>}</>}
         </button>
-        <div className="player-inventory">
+        <div className="player-inventory inventory-return-zone">
           {inventory.map((id, index) => (
-            <button className="gui-slot" key={index} onClick={() => id && onIngredient(id)} disabled={!id} aria-label={id ? `放入 ${id}` : `空背包格 ${index + 1}`}>
+            <button
+              className={`gui-slot ${id ? "draggable-item" : ""}`}
+              key={index}
+              onPointerDown={(event) => id && startPointerDrag(event, id, null)}
+              onPointerMove={movePointerDrag}
+              onPointerUp={finishPointerDrag}
+              onPointerCancel={cancelPointerDrag}
+              disabled={!id}
+              aria-label={id ? `拖动材料 ${id}` : `空背包格 ${index + 1}`}
+            >
               {id && <Sprite id={id} size={45} />}
               {id && recipe.slots.filter((slot) => slot?.id === id).length > 1 && <b>{recipe.slots.filter((slot) => slot?.id === id).length}</b>}
             </button>
@@ -267,13 +396,16 @@ function CraftingGui({
         </div>
       </div>
       <div className="gui-help">
-        {recipe.dynamic ? (
+        {matchedRecipe ? (
+          <p><b>✓ {matchedRecipe.result.name} matched!</b>排列正确：支持九宫格内任意平移；有方向的配方也支持水平镜像。点击右侧产物取出。</p>
+        ) : recipe.dynamic ? (
           <p><b>★ Dynamic recipe · 动态特殊配方</b>这种配方的结果取决于物品数据（例如染色、复制或修复），原游戏不会显示固定九宫格。</p>
         ) : (
-          <p><b>{matches ? "✓ Recipe complete — take the item!" : "Click materials in your inventory."}</b>{matches ? "配方完成，点击右侧产物取出。" : "点击背包中的材料，按原版位置放入工作台。"}</p>
+          <p><b>Drag materials into any slot.</b>从背包拖动材料到任意格。系统会按原版规则识别形状、平移、镜像和无序配方。</p>
         )}
-        <button onClick={() => { recipe.slots.forEach((slot) => slot && speak(slot.name ?? slot.id)); }}>🔊 Read materials</button>
+        <div><button onClick={() => spokenMaterials && speak(spokenMaterials)}>🔊 Materials</button><button onClick={onClear} disabled={!grid.some(Boolean)}>Clear</button></div>
       </div>
+      {dragVisual && <div className="drag-ghost" style={{ left: dragVisual.x, top: dragVisual.y }}><Sprite id={dragVisual.id} size={48} /></div>}
     </section>
   );
 }
@@ -293,7 +425,7 @@ function EnglishPanel({ recipe, completed, onFumi }: { recipe: Recipe; completed
         <small>SURVIVAL SENTENCE · 生存英语</small>
         <b>{sentence}</b>
         <p>我合成了一个{recipe.result.zh || "物品"}。</p>
-        <button onClick={() => speak(sentence)}>▶ Listen & repeat</button>
+        <button onClick={() => speak(sentence)}>🔊 Play voice · 跟读</button>
       </div>
       <div className="materials-vocab">
         <small>MATERIAL WORDS · 材料词汇</small>
@@ -329,6 +461,8 @@ function CraftingView({ onBack }: { onBack: () => void }) {
   const [showStats, setShowStats] = useState(false);
 
   const selected = catalog.recipes.find((recipe) => recipe.id === selectedId || recipe.result.id === selectedId) ?? catalog.recipes[0];
+  const matchedRecipe = useMemo(() => grid.some(Boolean) ? catalog.recipes.find((recipe) => matchesRecipe(recipe, grid)) ?? null : null, [grid]);
+  const displayRecipe = matchedRecipe ?? selected;
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
     return catalog.recipes.filter((recipe) => {
@@ -368,30 +502,28 @@ function CraftingView({ onBack }: { onBack: () => void }) {
     setVisibleLimit(96);
   }
 
-  function putIngredient(id: string) {
-    if (selected.dynamic) return;
+  function dropMaterial(targetIndex: number, id: string, sourceIndex: number | null) {
     setGrid((current) => {
       const next = [...current];
-      const target = selected.slots.findIndex((slot, index) => slot && next[index] === null && slot.alternatives.includes(id));
-      if (target < 0) return current;
-      next[target] = id;
-      playBlockTone("hit");
-      const word = selected.slots[target]?.name;
-      if (word) speak(word);
+      if (sourceIndex === targetIndex) return current;
+      if (sourceIndex !== null) next[sourceIndex] = next[targetIndex];
+      next[targetIndex] = id;
       return next;
     });
+    playBlockTone("hit");
   }
 
-  function craftItem() {
+  function craftItem(recipe: Recipe) {
     playBlockTone("craft");
     setCraftedPulse(true);
     setCraftCount((value) => value + 1);
-    if (!completed.includes(selected.id)) {
-      setCompleted((items) => [...items, selected.id]);
-      setXp((value) => value + 20 + Math.max(1, selected.ingredientCount) * 2);
+    setSelectedId(recipe.id);
+    if (!completed.includes(recipe.id)) {
+      setCompleted((items) => [...items, recipe.id]);
+      setXp((value) => value + 20 + Math.max(1, recipe.ingredientCount) * 2);
     }
-    speak(`I crafted ${articleFor(selected.result.name)} ${selected.result.name}.`);
     window.setTimeout(() => setCraftedPulse(false), 450);
+    window.setTimeout(() => setGrid(Array(9).fill(null)), 310);
   }
 
   const currentLevel = Math.floor(xp / 250) + 1;
@@ -424,11 +556,12 @@ function CraftingView({ onBack }: { onBack: () => void }) {
           onClose={() => setBookOpen(false)}
         />}
         <CraftingGui
-          recipe={selected} grid={grid} onIngredient={putIngredient}
+          recipe={selected} matchedRecipe={matchedRecipe} grid={grid} onDropMaterial={dropMaterial}
           onRemove={(index) => setGrid((current) => current.map((item, itemIndex) => itemIndex === index ? null : item))}
+          onClear={() => setGrid(Array(9).fill(null))}
           onCraft={craftItem} onOpenBook={() => setBookOpen((value) => !value)} bookOpen={bookOpen} craftedPulse={craftedPulse}
         />
-        <EnglishPanel recipe={selected} completed={completed.includes(selected.id)} onFumi={() => setFumiOpen(true)} />
+        <EnglishPanel recipe={displayRecipe} completed={completed.includes(displayRecipe.id)} onFumi={() => setFumiOpen(true)} />
       </div>
 
       <div className="catalog-proof">
@@ -442,9 +575,9 @@ function CraftingView({ onBack }: { onBack: () => void }) {
         <button className="fumi-backdrop" onClick={() => setFumiOpen(false)} aria-label="关闭 FUMI AI" />
         <aside className="fumi-console">
           <div className="fumi-head"><span>✦</span><div><b>FUMI AI</b><small>CRAFTING ASSISTANT</small></div><button onClick={() => setFumiOpen(false)}>×</button></div>
-          <div className="fumi-target"><Sprite id={selected.result.id} size={52} /><div><small>CURRENT RECIPE</small><b>{selected.result.name}</b><p>{selected.result.zh}</p></div></div>
-          <div className="fumi-message"><span>F</span><p>{hintLevel === 0 ? `先读出产物：${selected.result.name}。你能在背包里找到第一种材料吗？` : hintLevel === 1 ? `观察九宫格形状。这个配方需要 ${selected.ingredientCount} 个材料格；相同材料也要逐个放入。` : selected.dynamic ? "这是动态特殊配方，原游戏会根据物品数据计算结果，不存在固定排列。" : "最后检查：空格也属于配方的一部分。材料位置与配方书完全一致时，右侧产物才会出现。"}</p></div>
-          <div className="fumi-actions"><button onClick={() => setHintLevel((value) => Math.min(2, value + 1))}>Give me one more hint</button><button onClick={() => speak(selected.result.name)}>Read the item name</button><button onClick={() => speak(`I crafted ${articleFor(selected.result.name)} ${selected.result.name}.`)}>Read the full sentence</button></div>
+          <div className="fumi-target"><Sprite id={displayRecipe.result.id} size={52} /><div><small>CURRENT RECIPE</small><b>{displayRecipe.result.name}</b><p>{displayRecipe.result.zh}</p></div></div>
+          <div className="fumi-message"><span>F</span><p>{hintLevel === 0 ? `先读出产物：${displayRecipe.result.name}。你能在背包里找到第一种材料吗？` : hintLevel === 1 ? `观察九宫格形状。这个配方需要 ${displayRecipe.ingredientCount} 个材料格；相同材料也要逐个拖入。` : displayRecipe.dynamic ? "这是动态特殊配方，原游戏会根据物品数据计算结果，不存在固定排列。" : "最后检查形状与空格。整个图形可以在九宫格内平移；有方向的图形也可以水平镜像。"}</p></div>
+          <div className="fumi-actions"><button onClick={() => setHintLevel((value) => Math.min(2, value + 1))}>Give me one more hint</button><button onClick={() => speak(displayRecipe.result.name)}>🔊 Read the item name</button><button onClick={() => speak(`I crafted ${articleFor(displayRecipe.result.name)} ${displayRecipe.result.name}.`)}>🔊 Read the full sentence</button></div>
           <div className="hint-meter"><span>Hint level {hintLevel + 1}/3</span><p><i style={{ width: `${((hintLevel + 1) / 3) * 100}%` }} /></p></div>
         </aside>
       </div>}
