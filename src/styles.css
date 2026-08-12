@@ -39,9 +39,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fff36e; outline-
 .far-hills i:nth-child(2) { height: 78%; background: #486f45; }
 .far-hills i:nth-child(3) { height: 44%; background: #5f8d55; }
 .far-hills i:nth-child(4) { height: 67%; background: #416b46; }
-.ground-plane { position: absolute; left: -22%; right: -22%; top: 54%; bottom: -14%; background: url("/mc/grass.png") 0 0 / 96px 96px, #58913b; transform-origin: 50% 0; transform: perspective(550px) rotateX(54deg) scale(1.22); image-rendering: pixelated; filter: saturate(1.12) brightness(.93); }
+.ground-plane { position: absolute; left: -22%; right: -22%; top: 54%; bottom: -14%; background: url("/mc/grass.png") 0 0 / 96px 96px, #75b64a; background-blend-mode: multiply; transform-origin: 50% 0; transform: perspective(550px) rotateX(54deg) scale(1.22); image-rendering: pixelated; filter: saturate(1.16) brightness(1.16); }
 .grass-edge { position: absolute; left: 0; right: 0; top: 58%; height: 28px; background: linear-gradient(#4b8b30 0 34%, transparent 34%), url("/mc/dirt.png") 0 0 / 48px 48px; opacity: .75; image-rendering: pixelated; }
-.tree { position: absolute; bottom: 38%; width: 180px; height: 330px; z-index: -1; filter: drop-shadow(12px 13px rgba(30,55,25,.18)); }
+.tree { position: absolute; bottom: 38%; width: 180px; height: 330px; filter: drop-shadow(12px 13px rgba(30,55,25,.18)); }
 .tree b { position: absolute; left: 73px; bottom: 0; width: 54px; height: 210px; background: url("/mc/oak-log.png") 0 0 / 54px 54px; image-rendering: pixelated; }
 .tree span { position: absolute; background: url("/mc/oak-leaves.png") 0 0 / 48px 48px, #315f2f; image-rendering: pixelated; }
 .tree span:nth-of-type(1) { left: 10px; top: 10px; width: 168px; height: 150px; }
@@ -112,7 +112,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fff36e; outline-
 .craft-stats span { color: #ffe270; }
 .craft-stats b { color: #6fff34; }
 .craft-workspace { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(528px,1fr) minmax(265px,340px); gap: 22px; align-items: start; justify-content: center; width: max-content; min-width: min(100%,1150px); margin: 0 auto; }
-.craft-workspace.book-visible { grid-template-columns: minmax(330px,390px) 568px minmax(270px,340px); }
+.craft-workspace.book-visible { grid-template-columns: 350px 568px 310px; gap: 18px; }
 
 /* Recipe book: square and texture-heavy like the Java UI */
 .recipe-book { position: relative; width: 100%; min-width: 330px; max-width: 390px; height: min(72vh,650px); padding: 17px 15px 35px; color: #26231d; background: #eee4c9; border: 4px solid #171717; box-shadow: inset 4px 4px #fff9dd, inset -4px -4px #81745d, 8px 8px 0 rgba(0,0,0,.34); }

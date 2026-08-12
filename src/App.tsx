@@ -201,7 +201,7 @@ function RecipeBook({
       <div className="book-counter"><span>{recipes.length} recipes found</span><b>{Math.min(visibleLimit, recipes.length)} / {recipes.length}</b></div>
       <div className="recipe-grid">
         {recipes.slice(0, visibleLimit).map((recipe) => (
-          <button key={recipe.id} className={selected.id === recipe.id ? "selected" : ""} onClick={() => onSelect(recipe)} title={`${recipe.result.name}${recipe.result.zh ? ` · ${recipe.result.zh}` : ""}`}>
+          <button key={recipe.id} className={selected.id === recipe.id ? "selected" : ""} onClick={() => onSelect(recipe)} title={`${recipe.result.name}${recipe.result.zh ? ` · ${recipe.result.zh}` : ""}`} aria-label={`${recipe.result.name}${recipe.result.zh ? ` · ${recipe.result.zh}` : ""}`}>
             <Sprite id={recipe.result.id} size={36} />
             {recipe.result.count > 1 && <b>{recipe.result.count}</b>}
             {recipe.dynamic && <i>★</i>}
