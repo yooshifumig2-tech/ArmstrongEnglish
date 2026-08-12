@@ -26,6 +26,10 @@ The battle screen uses the six corresponding vanilla entity texture maps (Zombie
 
 The entity cube dimensions, bone hierarchy and UV coordinates come from Mojang's public [`bedrock-samples`](https://github.com/Mojang/bedrock-samples) vanilla resource pack (`resource_pack/models/entity`). They are normalized into `src/data/mobModels.ts` and rendered as textured CSS 3D cuboids, so the site uses the original model proportions without requiring WebGL. Battle sounds are generated locally with the Web Audio API and do not redistribute Mojang audio files.
 
+The CSS cuboid UV layout is cross-checked against PrismarineJS's open-source [`Entity.js`](https://github.com/PrismarineJS/prismarine-viewer/blob/master/viewer/lib/entity/Entity.js) renderer. Each texture is sampled at its real PNG dimensions (including the classic 64×32 Creeper, Skeleton and Enderman atlases), and hidden backfaces prevent an inward-facing polygon from covering the visible face.
+
+The first-person weapon pose is based on the vanilla [`item/handheld.json`](https://github.com/misode/mcmeta/blob/assets/assets/minecraft/models/item/handheld.json) display transform and the open-source first-person matrix implementation in [`minecraft-renderer`](https://github.com/zardoy/minecraft-renderer/blob/main/src/three/holdingBlock.ts). Item depth uses the same texture-layer principle documented in its [`itemMesh.ts`](https://github.com/zardoy/minecraft-renderer/blob/main/src/three/itemMesh.ts); the site keeps the original sword pixels and does not redraw the weapon.
+
 ## Reproduction
 
 `scripts/generate_minecraft_catalog.py` parses the official recipe registry, item tags, English language table, Simplified Chinese language asset, item definitions and texture models. It generates:
