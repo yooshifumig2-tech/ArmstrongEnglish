@@ -16,6 +16,19 @@ const VIEW: Record<MobModelId, { unit: number; pitch: number; yaw: number; roll?
   ender_dragon: { unit: 1.35, pitch: -18, yaw: 132, roll: -2, y: 7 },
 };
 
+// The geometry metadata and the actual PNG do not always share a height.
+// In particular, our zombie resource is a modern 64x64 skin while the classic
+// Creeper, Skeleton and Enderman atlases are still 64x32. UVs must be scaled
+// against the PNG itself or a head face samples the top/side/transparent row.
+const TEXTURE_SIZE: Record<MobModelId, readonly [number, number]> = {
+  zombie: [64, 64],
+  skeleton: [64, 32],
+  creeper: [64, 32],
+  enderman: [64, 32],
+  warden: [128, 128],
+  ender_dragon: [256, 256],
+};
+
 const POSES: Partial<Record<MobModelId, Record<string, Vec3>>> = {
   zombie: { rightArm: [-72, 0, 0], leftArm: [-72, 0, 0], rightLeg: [8, 0, 0], leftLeg: [-8, 0, 0] },
   skeleton: { rightArm: [-68, 9, 22], leftArm: [-78, -12, -34], rightLeg: [5, 0, 0], leftLeg: [-5, 0, 0] },
@@ -94,8 +107,8 @@ function boneBounds(model: ModelDefinition) {
   return { center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2] as Vec3 };
 }
 
-function BoneGroup({ id, bone, model, center, unit, texture, atlasHeight, children }: {
-  id: MobModelId; bone: BoneDefinition; model: ModelDefinition; center: Vec3; unit: number; texture: string; atlasHeight: number; children?: ReactNode;
+function BoneGroup({ id, bone, center, unit, texture, textureWidth, textureHeight, children }: {
+  id: MobModelId; bone: BoneDefinition; center: Vec3; unit: number; texture: string; textureWidth: number; textureHeight: number; children?: ReactNode;
 }) {
   const pivot = bone.pivot ?? [0, 0, 0];
   const rotation = mergeRotation(bone.bind_pose_rotation ?? bone.rotation, POSES[id]?.[bone.name]);
@@ -108,7 +121,7 @@ function BoneGroup({ id, bone, model, center, unit, texture, atlasHeight, childr
     "--bone-rz": `${rotation[2]}deg`,
   } as CSSProperties;
   return <span className={`entity-bone bone-${bone.name.replace(/[^a-z0-9_-]/gi, "-")}`} style={style}>
-    {bone.cubes?.map((cube, index) => <VoxelCube key={index} cube={cube} unit={unit} texture={texture} textureWidth={model.texturewidth} textureHeight={atlasHeight} pivot={pivot} mirrored={bone.mirror} />)}
+    {bone.cubes?.map((cube, index) => <VoxelCube key={index} cube={cube} unit={unit} texture={texture} textureWidth={textureWidth} textureHeight={textureHeight} pivot={pivot} mirrored={bone.mirror} />)}
     {children}
   </span>;
 }
@@ -117,12 +130,12 @@ export default function MobModel3D({ id, animation = "idle", compact = false }: 
   const model = MOB_MODELS[id] as unknown as ModelDefinition;
   const view = VIEW[id];
   const texture = `/mc/mobs/${id}.png`;
-  const atlasHeight = model.textureheight === 32 ? 64 : model.textureheight;
+  const [textureWidth, textureHeight] = TEXTURE_SIZE[id];
   const { center } = boneBounds(model);
   // Vanilla pivots are expressed in global model coordinates. Keeping every bone
   // at that global pivot avoids double translations while still allowing each limb
   // to rotate around the same point used by the game renderer.
-  const renderBone = (bone: BoneDefinition): ReactNode => <BoneGroup key={bone.name} id={id} bone={bone} model={model} center={center} unit={view.unit} texture={texture} atlasHeight={atlasHeight} />;
+  const renderBone = (bone: BoneDefinition): ReactNode => <BoneGroup key={bone.name} id={id} bone={bone} center={center} unit={view.unit} texture={texture} textureWidth={textureWidth} textureHeight={textureHeight} />;
   const rootStyle = {
     "--entity-rx": `${view.pitch}deg`, "--entity-ry": `${view.yaw}deg`, "--entity-rz": `${view.roll ?? 0}deg`, "--entity-y": `${view.y ?? 0}px`,
   } as CSSProperties;
