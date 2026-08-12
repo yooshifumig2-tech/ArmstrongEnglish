@@ -256,9 +256,14 @@ function WorldView({ onOpen }: { onOpen: () => void }) {
 
       <button className={`world-table ${hits ? "was-hit" : ""}`} onClick={hitTable} aria-label="点击合成台打开工作台">
         <span className="cube-body">
-          <i className="cube-face cube-top" />
-          <i className="cube-face cube-front" />
-          <i className="cube-face cube-side" />
+          <svg className="cube-model" viewBox="0 0 320 320" role="presentation" aria-hidden="true">
+            <image className="cube-face cube-side" href="/mc/crafting-table-side.png" x="0" y="0" width="16" height="16" preserveAspectRatio="none" transform="matrix(9 3.375 0 10.875 16 80)" />
+            <image className="cube-face cube-front" href="/mc/crafting-table-front.png" x="0" y="0" width="16" height="16" preserveAspectRatio="none" transform="matrix(9 -3.375 0 10.875 160 134)" />
+            <image className="cube-face cube-top" href="/mc/crafting-table-top.png" x="0" y="0" width="16" height="16" preserveAspectRatio="none" transform="matrix(9 3.4375 -9 3.4375 160 25)" />
+            <path className="cube-side-shade" d="M16 80 160 134 160 308 16 254Z" />
+            <path className="cube-top-light" d="M160 25 304 80 160 134 16 80Z" />
+            <path className="cube-edges" d="M160 25 304 80 304 254 160 308 16 254 16 80 160 25ZM16 80 160 134 304 80M160 134V308" />
+          </svg>
         </span>
         <span className="cube-shadow" />
         <i className="target-label">CRAFTING TABLE<small>点击 / CLICK</small></i>
