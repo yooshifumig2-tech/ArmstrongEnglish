@@ -1,4 +1,4 @@
-import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import catalogJson from "./data/recipes26_2.json";
 import spriteJson from "./data/sprites26_2.json";
 
@@ -38,6 +38,7 @@ type SpriteData = {
 };
 
 type Category = "all" | "building" | "equipment" | "redstone" | "misc" | "special";
+type Tier = 1 | 2 | 3 | 4 | 5;
 
 const catalog = catalogJson as Catalog;
 const spriteData = spriteJson as unknown as SpriteData;
@@ -50,6 +51,47 @@ const CATEGORY_INFO: { id: Category; icon: string; label: string; en: string }[]
   { id: "misc", icon: "✦", label: "杂项", en: "Misc" },
   { id: "special", icon: "★", label: "特殊", en: "Special" },
 ];
+const TIER_INFO: { id: Tier; name: string; zh: string; color: string; description: string }[] = [
+  { id: 1, name: "Survival", zh: "生存入门", color: "#8fbd63", description: "木材、基础工具与第一夜用品" },
+  { id: 2, name: "Explorer", zh: "探索者", color: "#78b9c9", description: "石材、铜、玻璃与探索装备" },
+  { id: 3, name: "Engineer", zh: "工程师", color: "#d7aa57", description: "铁、金、红石与机械装置" },
+  { id: 4, name: "Treasure", zh: "寻宝大师", color: "#5fd2dc", description: "钻石、附魔与稀有资源" },
+  { id: 5, name: "Legend", zh: "传奇工匠", color: "#b47bdd", description: "下界合金、信标与终局物品" },
+];
+const TIER_TASKS: Record<1 | 2 | 3 | 4, string[]> = {
+  1: ["crafting_table", "wooden_pickaxe", "torch"],
+  2: ["stone_pickaxe", "furnace", "shield"],
+  3: ["iron_pickaxe", "compass", "piston"],
+  4: ["diamond_pickaxe", "enchanting_table", "end_crystal"],
+};
+const FORCED_TIERS: Record<string, Tier> = {
+  crafting_table: 1, wooden_pickaxe: 1, torch: 1,
+  stone_pickaxe: 2, furnace: 2, shield: 2,
+  iron_pickaxe: 3, compass: 3, piston: 3,
+  diamond_pickaxe: 4, enchanting_table: 4, end_crystal: 4,
+};
+
+function tierForRecipe(recipe: Recipe): Tier {
+  const forced = FORCED_TIERS[recipe.result.id];
+  if (forced) return forced;
+  const materialText = [recipe.result.id, ...recipe.slots.filter((slot): slot is Ingredient => Boolean(slot)).flatMap((slot) => slot.alternatives.slice(0, 8))].join(" ");
+  if (/netherite|nether_star|beacon|conduit|respawn_anchor|lodestone|echo_shard|end_crystal/.test(materialText)) return 5;
+  if (/diamond|emerald|enchant|ender_eye|ender_chest|ghast_tear|blaze_rod|crying_obsidian|golden_apple/.test(materialText)) return 4;
+  if (/iron|gold|redstone|piston|observer|comparator|repeater|compass|clock|rail|crossbow|anvil|dispenser|dropper/.test(materialText) || recipe.ingredientCount >= 8) return 3;
+  if (/stone|copper|glass|wool|leather|bow|bucket|campfire|brick|quartz|amethyst|lapis/.test(materialText) || recipe.ingredientCount >= 5) return 2;
+  return 1;
+}
+
+function recipeForResult(resultId: string) {
+  return catalog.recipes.find((recipe) => recipe.result.id === resultId);
+}
+
+function pluralizeItem(name: string) {
+  const words = name.split(" ");
+  const last = words.pop() ?? name;
+  const plural = /[^aeiou]y$/i.test(last) ? `${last.slice(0, -1)}ies` : /(s|x|z|ch|sh)$/i.test(last) ? `${last}es` : `${last}s`;
+  return [...words, plural].join(" ");
+}
 
 function Sprite({ id, size = 32, label }: { id: string; size?: number; label?: string }) {
   const position = spriteData.sprites[id];
@@ -243,13 +285,14 @@ function WorldView({ onOpen }: { onOpen: () => void }) {
 }
 
 function RecipeBook({
-  recipes, selected, category, query, visibleLimit, onSelect, onCategory, onQuery, onMore, onClose,
+  recipes, selected, category, query, visibleLimit, unlockedTier, onSelect, onCategory, onQuery, onMore, onClose,
 }: {
   recipes: Recipe[];
   selected: Recipe;
   category: Category;
   query: string;
   visibleLimit: number;
+  unlockedTier: Tier;
   onSelect: (recipe: Recipe) => void;
   onCategory: (category: Category) => void;
   onQuery: (query: string) => void;
@@ -272,13 +315,16 @@ function RecipeBook({
       <label className="recipe-search"><span>⌕</span><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search item / 搜索物品" /></label>
       <div className="book-counter"><span>{recipes.length} recipes found</span><b>{Math.min(visibleLimit, recipes.length)} / {recipes.length}</b></div>
       <div className="recipe-grid">
-        {recipes.slice(0, visibleLimit).map((recipe) => (
-          <button key={recipe.id} className={selected.id === recipe.id ? "selected" : ""} onClick={() => onSelect(recipe)} title={`${recipe.result.name}${recipe.result.zh ? ` · ${recipe.result.zh}` : ""}`} aria-label={`${recipe.result.name}${recipe.result.zh ? ` · ${recipe.result.zh}` : ""}`}>
+        {recipes.slice(0, visibleLimit).map((recipe) => {
+          const tier = tierForRecipe(recipe);
+          const locked = tier > unlockedTier;
+          return <button key={recipe.id} className={`${selected.id === recipe.id ? "selected" : ""} ${locked ? "locked" : ""}`} onClick={() => onSelect(recipe)} disabled={locked} title={`${recipe.result.name}${recipe.result.zh ? ` · ${recipe.result.zh}` : ""} · Tier ${tier}`} aria-label={`${locked ? "未解锁 · " : ""}${recipe.result.name}${recipe.result.zh ? ` · ${recipe.result.zh}` : ""} · Tier ${tier}`}>
             <Sprite id={recipe.result.id} size={36} />
             {recipe.result.count > 1 && <b>{recipe.result.count}</b>}
             {recipe.dynamic && <i>★</i>}
-          </button>
-        ))}
+            <em style={{ background: TIER_INFO[tier - 1].color }}>{locked ? "🔒" : tier}</em>
+          </button>;
+        })}
       </div>
       {visibleLimit < recipes.length && <button className="load-recipes" onClick={onMore}>Load more · 加载更多</button>}
       <div className="book-page">1 / {Math.max(1, Math.ceil(recipes.length / visibleLimit))}</div>
@@ -445,6 +491,144 @@ function titleFromId(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter: string) => letter.toUpperCase());
 }
 
+function ProgressionPanel({
+  unlockedTier, completed, assessmentPassed, onSelect, onAssessment,
+}: {
+  unlockedTier: Tier;
+  completed: string[];
+  assessmentPassed: string[];
+  onSelect: (recipe: Recipe) => void;
+  onAssessment: (recipe: Recipe) => void;
+}) {
+  const taskIds = unlockedTier < 5 ? TIER_TASKS[unlockedTier as 1 | 2 | 3 | 4] : [];
+  const tasks = taskIds.map(recipeForResult).filter((recipe): recipe is Recipe => Boolean(recipe));
+  const passedCount = tasks.filter((recipe) => assessmentPassed.includes(recipe.id)).length;
+  return (
+    <section className="progression-panel">
+      <div className="tier-track">
+        {TIER_INFO.map((tier) => <div key={tier.id} className={`${tier.id <= unlockedTier ? "unlocked" : "locked"} ${tier.id === unlockedTier ? "current" : ""}`} style={{ "--tier-color": tier.color } as CSSProperties}>
+          <span>{tier.id <= unlockedTier ? tier.id : "🔒"}</span><b>{tier.name}</b><small>{tier.zh}</small>
+        </div>)}
+      </div>
+      {unlockedTier < 5 ? <>
+        <header className="progression-head">
+          <div><small>UNLOCK MISSION · 阶级解锁任务</small><h2>Tier {unlockedTier + 1}: {TIER_INFO[unlockedTier].name}</h2><p>先合成每件任务物品，再通过它的英语考核。全部完成后自动解锁下一阶配方。</p></div>
+          <strong>{passedCount}/{tasks.length}<small>ASSESSMENTS</small></strong>
+        </header>
+        <div className="unlock-tasks">
+          {tasks.map((recipe, index) => {
+            const crafted = completed.includes(recipe.id);
+            const passed = assessmentPassed.includes(recipe.id);
+            return <article key={recipe.id} className={passed ? "passed" : crafted ? "ready" : ""}>
+              <i>{index + 1}</i><Sprite id={recipe.result.id} size={48} />
+              <div><small>{crafted ? passed ? "ASSESSMENT PASSED" : "READY FOR ASSESSMENT" : "CRAFTING REQUIRED"}</small><b>{recipe.result.name}</b><p>{recipe.result.zh}</p></div>
+              {passed ? <button disabled>✓ 已通过</button> : crafted ? <button onClick={() => onAssessment(recipe)}>进入考核 →</button> : <button onClick={() => onSelect(recipe)}>查看配方</button>}
+            </article>;
+          })}
+        </div>
+      </> : <div className="max-tier"><span>✦</span><div><small>ALL TIERS UNLOCKED</small><h2>Legendary Crafter · 传奇工匠</h2><p>你已经解锁全部制作物品。现在可以继续挑战所有配方与英语复习。</p></div></div>}
+    </section>
+  );
+}
+
+function AssessmentView({ recipe, onBack, onComplete }: { recipe: Recipe; onBack: () => void; onComplete: () => void }) {
+  type BankWord = { id: number; text: string };
+  type DragWord = BankWord & { x: number; y: number; moved: boolean };
+  const [question, setQuestion] = useState(0);
+  const [assembled, setAssembled] = useState<BankWord[]>([]);
+  const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const [spelling, setSpelling] = useState("");
+  const [wrongAttempts, setWrongAttempts] = useState(0);
+  const [dragWord, setDragWord] = useState<DragWord | null>(null);
+  const dragRef = useRef<DragWord | null>(null);
+  const item = recipe.result.name.toLowerCase();
+  const itemWords = item.split(" ");
+  const mode = recipe.result.id.length % 3;
+  const sentence = useMemo(() => {
+    if (mode === 0) return { words: ["Yesterday,", "I", "crafted", articleFor(item), ...itemWords, "because", "I", "needed", "it."], rule: "Yesterday 表示过去，动词要用过去式 crafted；because 引导原因从句。" };
+    if (mode === 1) return { words: ["I", "use", "two", ...pluralizeItem(item).split(" "), "when", "I", "explore", "a", "cave."], rule: "two 后面的可数名词要用复数；when 引导时间从句，描述经常发生的事用一般现在时。" };
+    return { words: ["Tomorrow,", "I", "will", "craft", articleFor(item), ...itemWords, "before", "I", "explore", "the", "cave."], rule: "Tomorrow 表示将来，使用 will + 动词原形；before 引导时间从句。" };
+  }, [item, mode]);
+  const bank = useMemo(() => {
+    const distractors = mode === 0 ? ["craft", "crafts"] : mode === 1 ? [item, "uses"] : ["crafted", "crafts"];
+    return [...sentence.words, ...distractors].map((text, id) => ({ id, text })).sort((a, b) => {
+      const score = (word: BankWord) => [...`${recipe.id}-${word.text}-${word.id}`].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 17;
+      return score(a) - score(b) || b.id - a.id;
+    });
+  }, [mode, recipe.id, sentence.words, item]);
+  const judgmentCorrect = recipe.result.id.length % 2 === 0;
+  const judgmentSentence = judgmentCorrect ? `I keep two ${pluralizeItem(item)} in my chest.` : `Yesterday, I craft ${articleFor(item)} ${item}.`;
+  const usedIds = new Set(assembled.map((word) => word.id));
+
+  function startWordDrag(event: ReactPointerEvent<HTMLButtonElement>, word: BankWord) {
+    if (feedback?.ok) return;
+    event.preventDefault();
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* optional */ }
+    const next = { ...word, x: event.clientX, y: event.clientY, moved: false };
+    dragRef.current = next;
+    setDragWord(next);
+  }
+  function moveWordDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!dragRef.current) return;
+    const next = { ...dragRef.current, x: event.clientX, y: event.clientY, moved: true };
+    dragRef.current = next;
+    setDragWord(next);
+  }
+  function finishWordDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const active = dragRef.current;
+    if (!active) return;
+    if (document.elementFromPoint(event.clientX, event.clientY)?.closest(".sentence-answer")) setAssembled((words) => [...words, { id: active.id, text: active.text }]);
+    dragRef.current = null;
+    setDragWord(null);
+  }
+  function answer(ok: boolean, explanation: string) {
+    setFeedback({ ok, text: ok ? "回答正确！" : explanation });
+    if (!ok) setWrongAttempts((value) => value + 1);
+  }
+  function checkSentence() {
+    const ok = assembled.length === sentence.words.length && assembled.every((word, index) => word.text === sentence.words[index]);
+    answer(ok, `解析：${sentence.rule}`);
+  }
+  function checkSpelling() {
+    const normalize = (value: string) => value.toLowerCase().replace(/[^a-z]/g, "");
+    answer(normalize(spelling) === normalize(recipe.result.name), `解析：正确拼写是 “${recipe.result.name}”。请注意每个字母和单词之间的空格。`);
+  }
+  function nextQuestion() {
+    setFeedback(null);
+    setQuestion((value) => value + 1);
+  }
+
+  return <main className="assessment-view">
+    <header className="assessment-topbar"><button onClick={onBack}>← 暂停考核</button><div><small>CRAFTING ENGLISH ASSESSMENT</small><b>{recipe.result.name} · {recipe.result.zh}</b></div><span>QUESTION {Math.min(question + 1, 3)} / 3</span></header>
+    <div className="assessment-shell">
+      <aside className="assessment-item"><div className="assessment-cube"><Sprite id={recipe.result.id} size={112} /></div><small>TARGET ITEM</small><h1>{recipe.result.name}</h1><p>{recipe.result.zh}</p><button onClick={() => speak(recipe.result.name)}>🔊 物品发音</button><div className="assessment-map">{[0,1,2].map((step) => <i key={step} className={step < question ? "done" : step === question ? "current" : ""}>{step < question ? "✓" : step + 1}</i>)}</div></aside>
+      <section className="assessment-paper">
+        {question === 0 && <>
+          <div className="question-label"><span>01</span><div><small>SENTENCE CRAFTING · 拖动造句</small><h2>在游戏情境中组成正确的句子</h2></div></div>
+          <p className="question-context">任务：用 <b>{recipe.result.name}</b> 造句，注意时态、单复数和简单从句。把词块拖进下方工作台。</p>
+          <div className="sentence-answer">{assembled.length ? assembled.map((word, index) => <button key={`${word.id}-${index}`} onClick={() => !feedback?.ok && setAssembled((words) => words.filter((_, wordIndex) => wordIndex !== index))}>{word.text}</button>) : <span>DROP WORDS HERE · 把词块拖到这里</span>}</div>
+          <div className="word-bank">{bank.map((word) => <button key={word.id} disabled={usedIds.has(word.id) || feedback?.ok} onPointerDown={(event) => startWordDrag(event, word)} onPointerMove={moveWordDrag} onPointerUp={finishWordDrag} onPointerCancel={() => { dragRef.current = null; setDragWord(null); }}>{word.text}</button>)}</div>
+          {!feedback?.ok && <button className="check-answer" onClick={checkSentence} disabled={!assembled.length}>Check sentence · 检查句子</button>}
+        </>}
+        {question === 1 && <>
+          <div className="question-label"><span>02</span><div><small>GRAMMAR CHECK · 语法判断</small><h2>这个句子的时态或单复数正确吗？</h2></div></div>
+          <div className="judgment-card"><small>IN-GAME MESSAGE</small><b>{judgmentSentence}</b><button onClick={() => speak(judgmentSentence)}>🔊 播放句子</button></div>
+          {!feedback?.ok && <div className="judgment-actions"><button onClick={() => answer(judgmentCorrect, judgmentCorrect ? "解析：这句话没有错误。two 后使用了正确的复数形式。" : "解析：Yesterday 表示过去，craft 应改为 crafted。")}>✓ 正确</button><button onClick={() => answer(!judgmentCorrect, judgmentCorrect ? "解析：这句话没有错误。two 后使用了正确的复数形式。" : "解析：Yesterday 表示过去，craft 应改为 crafted。")}>✕ 有错误</button></div>}
+        </>}
+        {question === 2 && <>
+          <div className="question-label"><span>03</span><div><small>ITEM SPELLING · 单词拼写</small><h2>拼写这个制作物品的完整英文名</h2></div></div>
+          <div className="spelling-clue"><Sprite id={recipe.result.id} size={72} /><div><small>中文提示</small><b>{recipe.result.zh}</b><p>{recipe.result.name.split(" ").map((word) => `${word[0]}${"_".repeat(Math.max(1, word.length - 1))}`).join("  ")}</p></div></div>
+          <input className="spelling-input" value={spelling} onChange={(event) => { setSpelling(event.target.value); setFeedback(null); }} placeholder="Type the English item name..." disabled={feedback?.ok} autoComplete="off" />
+          {!feedback?.ok && <button className="check-answer" onClick={checkSpelling} disabled={!spelling.trim()}>Check spelling · 检查拼写</button>}
+        </>}
+        {question === 3 && <div className="assessment-finish"><span>✦</span><small>ASSESSMENT COMPLETE</small><h2>{recipe.result.name} 英语考核完成！</h2><p>你已完成造句、语法判断和拼写。错误尝试：<b>{wrongAttempts}</b> 次；所有错误都已订正。</p><button onClick={onComplete}>完成考核并返回工作台 →</button></div>}
+        {feedback && question < 3 && <div className={`answer-feedback ${feedback.ok ? "correct" : "wrong"}`}><span>{feedback.ok ? "✓" : "!"}</span><p><b>{feedback.ok ? "Correct · 回答正确" : "Not yet · 再想一想"}</b>{feedback.text}</p>{feedback.ok ? <button onClick={nextQuestion}>{question === 2 ? "查看结果" : "下一题 →"}</button> : <button onClick={() => setFeedback(null)}>订正答案</button>}</div>}
+      </section>
+    </div>
+    {dragWord && <div className="word-ghost" style={{ left: dragWord.x, top: dragWord.y }}>{dragWord.text}</div>}
+  </main>;
+}
+
 function CraftingView({ onBack }: { onBack: () => void }) {
   const [selectedId, setSelectedId] = useState("crafting_table");
   const [category, setCategory] = useState<Category>("all");
@@ -459,9 +643,13 @@ function CraftingView({ onBack }: { onBack: () => void }) {
   const [hintLevel, setHintLevel] = useState(0);
   const [craftedPulse, setCraftedPulse] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [unlockedTier, setUnlockedTier] = useState<Tier>(1);
+  const [assessmentPassed, setAssessmentPassed] = useState<string[]>([]);
+  const [assessmentRecipe, setAssessmentRecipe] = useState<Recipe | null>(null);
+  const [unlockNotice, setUnlockNotice] = useState<Tier | null>(null);
 
   const selected = catalog.recipes.find((recipe) => recipe.id === selectedId || recipe.result.id === selectedId) ?? catalog.recipes[0];
-  const matchedRecipe = useMemo(() => grid.some(Boolean) ? catalog.recipes.find((recipe) => matchesRecipe(recipe, grid)) ?? null : null, [grid]);
+  const matchedRecipe = useMemo(() => grid.some(Boolean) ? catalog.recipes.find((recipe) => tierForRecipe(recipe) <= unlockedTier && matchesRecipe(recipe, grid)) ?? null : null, [grid, unlockedTier]);
   const displayRecipe = matchedRecipe ?? selected;
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -478,12 +666,14 @@ function CraftingView({ onBack }: { onBack: () => void }) {
       setXp(saved.xp ?? 0);
       setCraftCount(saved.craftCount ?? 0);
       setCompleted(saved.completed ?? []);
+      setUnlockedTier(Math.min(5, Math.max(1, saved.unlockedTier ?? 1)) as Tier);
+      setAssessmentPassed(saved.assessmentPassed ?? []);
     } catch { /* progress should never block the game */ }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ xp, craftCount, completed }));
-  }, [xp, craftCount, completed]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ xp, craftCount, completed, unlockedTier, assessmentPassed }));
+  }, [xp, craftCount, completed, unlockedTier, assessmentPassed]);
 
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
@@ -496,6 +686,7 @@ function CraftingView({ onBack }: { onBack: () => void }) {
   }, [fumiOpen, onBack]);
 
   function selectRecipe(recipe: Recipe) {
+    if (tierForRecipe(recipe) > unlockedTier) return;
     setSelectedId(recipe.id);
     setGrid(Array(9).fill(null));
     setHintLevel(0);
@@ -529,6 +720,22 @@ function CraftingView({ onBack }: { onBack: () => void }) {
   const currentLevel = Math.floor(xp / 250) + 1;
   const levelXp = xp % 250;
 
+  function completeAssessment(recipe: Recipe) {
+    const nextPassed = assessmentPassed.includes(recipe.id) ? assessmentPassed : [...assessmentPassed, recipe.id];
+    setAssessmentPassed(nextPassed);
+    if (unlockedTier < 5) {
+      const currentTasks = TIER_TASKS[unlockedTier as 1 | 2 | 3 | 4].map(recipeForResult).filter((item): item is Recipe => Boolean(item));
+      if (currentTasks.every((item) => nextPassed.includes(item.id))) {
+        const nextTier = (unlockedTier + 1) as Tier;
+        setUnlockedTier(nextTier);
+        setUnlockNotice(nextTier);
+      }
+    }
+    setAssessmentRecipe(null);
+  }
+
+  if (assessmentRecipe) return <AssessmentView recipe={assessmentRecipe} onBack={() => setAssessmentRecipe(null)} onComplete={() => completeAssessment(assessmentRecipe)} />;
+
   return (
     <main className="crafting-view">
       <WorldScene dimmed />
@@ -550,7 +757,7 @@ function CraftingView({ onBack }: { onBack: () => void }) {
 
       <div className={`craft-workspace ${bookOpen ? "book-visible" : ""}`}>
         {bookOpen && <RecipeBook
-          recipes={filtered} selected={selected} category={category} query={query} visibleLimit={visibleLimit}
+          recipes={filtered} selected={selected} category={category} query={query} visibleLimit={visibleLimit} unlockedTier={unlockedTier}
           onSelect={selectRecipe} onCategory={(next) => { setCategory(next); setVisibleLimit(96); }}
           onQuery={(next) => { setQuery(next); setVisibleLimit(96); }} onMore={() => setVisibleLimit((value) => value + 96)}
           onClose={() => setBookOpen(false)}
@@ -563,6 +770,8 @@ function CraftingView({ onBack }: { onBack: () => void }) {
         />
         <EnglishPanel recipe={displayRecipe} completed={completed.includes(displayRecipe.id)} onFumi={() => setFumiOpen(true)} />
       </div>
+
+      <ProgressionPanel unlockedTier={unlockedTier} completed={completed} assessmentPassed={assessmentPassed} onSelect={(recipe) => { selectRecipe(recipe); window.scrollTo({ top: 0, behavior: "smooth" }); }} onAssessment={setAssessmentRecipe} />
 
       <div className="catalog-proof">
         <span>OFFICIAL DATA PACK 107.1</span>
@@ -581,6 +790,8 @@ function CraftingView({ onBack }: { onBack: () => void }) {
           <div className="hint-meter"><span>Hint level {hintLevel + 1}/3</span><p><i style={{ width: `${((hintLevel + 1) / 3) * 100}%` }} /></p></div>
         </aside>
       </div>}
+
+      {unlockNotice && <div className="unlock-layer" role="dialog" aria-modal="true" aria-label="新制作阶级已解锁"><div className="unlock-modal" style={{ "--tier-color": TIER_INFO[unlockNotice - 1].color } as CSSProperties}><span>✦</span><small>NEW CRAFTING TIER UNLOCKED</small><h2>Tier {unlockNotice}: {TIER_INFO[unlockNotice - 1].name}</h2><p>{TIER_INFO[unlockNotice - 1].zh} · {TIER_INFO[unlockNotice - 1].description}</p><button onClick={() => setUnlockNotice(null)}>进入新阶级 →</button></div></div>}
 
       <p className="craft-disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
     </main>
