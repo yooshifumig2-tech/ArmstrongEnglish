@@ -43,7 +43,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fff36e; outline-
 .grass-edge { position: absolute; left: 0; right: 0; top: 58%; height: 28px; background: linear-gradient(#4b8b30 0 34%, transparent 34%), url("/mc/dirt.png") 0 0 / 48px 48px; opacity: .75; image-rendering: pixelated; }
 .tree { position: absolute; bottom: 38%; width: 180px; height: 330px; filter: drop-shadow(12px 13px rgba(30,55,25,.18)); }
 .tree b { position: absolute; left: 73px; bottom: 0; width: 54px; height: 210px; background: url("/mc/oak-log.png") 0 0 / 54px 54px; image-rendering: pixelated; }
-.tree span { position: absolute; background: url("/mc/oak-leaves.png") 0 0 / 48px 48px, #315f2f; image-rendering: pixelated; }
+.tree span { position: absolute; background: url("/mc/oak-leaves.png") 0 0 / 48px 48px, #4f8d37; background-blend-mode: multiply; image-rendering: pixelated; filter: brightness(1.22) saturate(1.18); }
 .tree span:nth-of-type(1) { left: 10px; top: 10px; width: 168px; height: 150px; }
 .tree span:nth-of-type(2) { left: 34px; top: -36px; width: 120px; height: 105px; }
 .tree-left { left: 7%; transform: scale(.9); }
