@@ -512,6 +512,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fff36e; outline-
   .craft-topbar button, .assessment-topbar button, .unlock-tasks button, .assessment-item > button { min-height: 44px; }
   .book-head button { width: 44px; height: 44px; }
   .recipe-search { height: 44px; }
+  .recipe-search input { font-size: 16px; }
   .recipe-grid { max-height: calc(100% - 205px); }
   .recipe-grid button { min-height: 44px; }
   .load-recipes, .gui-help button, .fumi-actions button { min-height: 44px; }
@@ -534,7 +535,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fff36e; outline-
 @media (max-width: 410px) {
   .gui-column { height: 375px; }
   .gui-frame { transform: scale(.64); }
-  .recipe-toggle { left: calc(50% - 185px); top: 46px; transform: scale(.72); }
+  .recipe-toggle { left: max(4px,calc(50% - 185px)); top: 46px; transform: scale(.72); }
   .gui-help { top: 326px; }
   .recipe-book { height: 430px; }
   .recipe-grid { grid-template-columns: repeat(4,1fr); }
