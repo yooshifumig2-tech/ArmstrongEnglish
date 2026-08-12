@@ -1,6 +1,13 @@
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import catalogJson from "./data/recipes26_2.json";
 import spriteJson from "./data/sprites26_2.json";
+import { BATTLE_QUESTIONS, MONSTERS, type BattleQuestion, type MonsterConfig, type MonsterId } from "./data/battleQuestions";
+import {
+  ARMORS, STARTER_ARMOR, STARTER_WEAPON, WEAPONS, armorDamageReduction, ensureMissionGear,
+  gearName, rollMonsterDrop, romanLevel, weaponQuestionDamage,
+  type ArmorId, type GearItem, type WeaponId,
+} from "./data/battleGear";
+import MobModel3D from "./components/MobModel3D";
 
 type Ingredient = {
   id: string;
@@ -43,6 +50,17 @@ type Tier = 1 | 2 | 3 | 4 | 5;
 const catalog = catalogJson as Catalog;
 const spriteData = spriteJson as unknown as SpriteData;
 const STORAGE_KEY = "armstrong-minecraft-english-v2";
+type SavedProgress = {
+  xp?: number;
+  craftCount?: number;
+  completed?: string[];
+  unlockedTier?: Tier;
+  assessmentPassed?: string[];
+  gearInventory?: GearItem[];
+  equippedWeapon?: string;
+  equippedArmor?: string;
+  battleWins?: Record<string, number>;
+};
 const CATEGORY_INFO: { id: Category; icon: string; label: string; en: string }[] = [
   { id: "all", icon: "▦", label: "全部", en: "All Recipes" },
   { id: "building", icon: "▧", label: "建筑", en: "Building" },
@@ -70,6 +88,25 @@ const FORCED_TIERS: Record<string, Tier> = {
   iron_pickaxe: 3, compass: 3, piston: 3,
   diamond_pickaxe: 4, enchanting_table: 4, end_crystal: 4,
 };
+
+function readSavedProgress(): SavedProgress {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}"); }
+  catch { return {}; }
+}
+
+function writeSavedProgress(patch: Partial<SavedProgress>) {
+  const current = readSavedProgress();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, ...patch }));
+}
+
+function allMissionRecipeIds() {
+  return Object.values(TIER_TASKS).flat().map(recipeForResult).filter((recipe): recipe is Recipe => Boolean(recipe)).map((recipe) => recipe.id);
+}
+
+function completedMissionCount(progress: SavedProgress) {
+  const taskIds = new Set(allMissionRecipeIds());
+  return (progress.assessmentPassed ?? []).filter((id) => taskIds.has(id)).length;
+}
 
 function tierForRecipe(recipe: Recipe): Tier {
   const forced = FORCED_TIERS[recipe.result.id];
@@ -138,6 +175,67 @@ function playBlockTone(kind: "hit" | "open" | "craft") {
   gain.connect(context.destination);
   oscillator.start();
   oscillator.stop(context.currentTime + 0.22);
+}
+
+type BattleSound = "swing" | "mob_hurt" | "mob_death" | "player_hurt" | "fuse" | "explosion" | "arrow" | "sonic" | "teleport" | "crystal" | "loot";
+
+function playBattleSound(kind: BattleSound, monster: MonsterId = "zombie") {
+  const AudioContextClass = window.AudioContext ||
+    (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return;
+  const context = new AudioContextClass();
+  const now = context.currentTime;
+  const output = context.createGain();
+  output.gain.setValueAtTime(0.16, now);
+  output.connect(context.destination);
+
+  const tone = (frequency: number, duration: number, type: OscillatorType = "square", delay = 0, endFrequency?: number, volume = 0.32) => {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, now + delay);
+    if (endFrequency) oscillator.frequency.exponentialRampToValueAtTime(Math.max(20, endFrequency), now + delay + duration);
+    gain.gain.setValueAtTime(volume, now + delay);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + delay + duration);
+    oscillator.connect(gain);
+    gain.connect(output);
+    oscillator.start(now + delay);
+    oscillator.stop(now + delay + duration);
+  };
+  const noise = (duration: number, volume = 0.34, delay = 0, cutoff = 1100) => {
+    const buffer = context.createBuffer(1, Math.ceil(context.sampleRate * duration), context.sampleRate);
+    const channel = buffer.getChannelData(0);
+    for (let index = 0; index < channel.length; index += 1) channel[index] = Math.random() * 2 - 1;
+    const source = context.createBufferSource();
+    const filter = context.createBiquadFilter();
+    const gain = context.createGain();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(cutoff, now + delay);
+    gain.gain.setValueAtTime(volume, now + delay);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + delay + duration);
+    source.buffer = buffer;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(output);
+    source.start(now + delay);
+  };
+
+  if (kind === "swing") { noise(.16, .22, 0, 2600); tone(240, .12, "triangle", 0, 90, .2); }
+  if (kind === "player_hurt") { tone(155, .2, "square", 0, 78, .42); tone(110, .25, "sawtooth", .05, 55, .18); }
+  if (kind === "arrow") { tone(610, .12, "triangle", 0, 145, .3); noise(.1, .12, .08, 2400); }
+  if (kind === "fuse") { noise(.72, .28, 0, 3600); tone(96, .68, "sawtooth", 0, 180, .08); }
+  if (kind === "explosion") { noise(.9, .72, 0, 850); tone(82, .7, "sawtooth", 0, 28, .42); }
+  if (kind === "teleport") { noise(.3, .22, 0, 5000); tone(320, .34, "sine", 0, 1200, .25); }
+  if (kind === "sonic") { tone(48, .85, "sine", 0, 32, .7); tone(860, .42, "sawtooth", .1, 92, .18); noise(.62, .3, .08, 700); }
+  if (kind === "crystal") { tone(880, .16, "sine", 0, 1450, .22); tone(1320, .35, "triangle", .12, 210, .25); }
+  if (kind === "loot") { tone(440, .18, "square", 0, 660, .18); tone(660, .2, "square", .15, 880, .18); tone(880, .28, "triangle", .31, 1180, .2); }
+  if (kind === "mob_hurt" || kind === "mob_death") {
+    const base = monster === "creeper" ? 210 : monster === "skeleton" ? 430 : monster === "enderman" ? 270 : monster === "warden" ? 62 : monster === "ender_dragon" ? 78 : 118;
+    const duration = kind === "mob_death" ? 1.05 : .34;
+    tone(base, duration, monster === "skeleton" ? "triangle" : "sawtooth", 0, kind === "mob_death" ? base * .22 : base * .55, kind === "mob_death" ? .56 : .3);
+    if (monster === "warden" || monster === "ender_dragon") noise(duration * .8, .24, .08, 520);
+  }
+  window.setTimeout(() => context.close().catch(() => undefined), 1800);
 }
 
 function articleFor(name: string) {
@@ -226,7 +324,7 @@ function WorldScene({ dimmed = false }: { dimmed?: boolean }) {
   );
 }
 
-function WorldView({ onOpen }: { onOpen: () => void }) {
+function WorldView({ onOpen, onBattle }: { onOpen: () => void; onBattle: () => void }) {
   const [swinging, setSwinging] = useState(false);
   const [hits, setHits] = useState(0);
 
@@ -250,9 +348,14 @@ function WorldView({ onOpen }: { onOpen: () => void }) {
         <small>JAVA 26.2 LEARNING WORLD</small>
       </div>
       <div className="quest-toast">
-        <span>NEW QUEST</span>
-        <div><b>Open the Crafting Table</b><small>打开合成台 · 学会第一句游戏英语</small></div>
+        <span>CHOOSE QUEST</span>
+        <div><b>Craft or Fight</b><small>打开工作台学习 · 进入竞技场战斗</small></div>
       </div>
+
+      <button className="battle-portal" onClick={onBattle} aria-label="进入怪物英语竞技场">
+        <span className="portal-frame"><i /><i /><i /></span>
+        <b>MOB ARENA</b><small>怪物英语对战</small>
+      </button>
 
       <button className={`world-table ${hits ? "was-hit" : ""}`} onClick={hitTable} aria-label="点击合成台打开工作台">
         <span className="cube-body">
@@ -636,7 +739,330 @@ function AssessmentView({ recipe, onBack, onComplete }: { recipe: Recipe; onBack
   </main>;
 }
 
-function CraftingView({ onBack }: { onBack: () => void }) {
+type CombatAnimation = "idle" | "player-attack" | "monster-hurt" | "monster-attack" | "charging" | "teleporting" | "exploding" | "dying";
+
+function shuffled<T>(items: T[]) {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(Math.random() * (index + 1));
+    [next[index], next[target]] = [next[target], next[index]];
+  }
+  return next;
+}
+
+function MonsterModel({ id, animation = "idle", compact = false }: { id: MonsterId; animation?: CombatAnimation; compact?: boolean }) {
+  return <MobModel3D id={id} animation={animation} compact={compact} />;
+}
+
+function SwordTexture({ item, held = false }: { item: GearItem; held?: boolean }) {
+  if (item.baseId === "fist") return null;
+  const texture = `/mc/items/${item.baseId}.png?v=2`;
+  return <span className={`${held ? "held-weapon" : "vanilla-sword-sprite"} ${item.enchantment ? "enchanted" : ""}`} style={{ "--weapon-texture": `url(${texture})` } as CSSProperties}>
+    <img src={texture} alt={gearName(item)} />
+    {item.enchantment && <i className="weapon-glint" />}
+  </span>;
+}
+
+function FirstPersonWeapon({ item, preview = false, swinging = false }: { item: GearItem; preview?: boolean; swinging?: boolean }) {
+  return <div className={`${preview ? "loadout-held-preview" : "battle-arm"} ${swinging ? "swing" : ""}`}>
+    <span className={`first-person-rig ${item.baseId === "fist" ? "unarmed" : "armed"}`}>
+      <span className="first-person-arm"><i className="arm-face arm-front" /><i className="arm-face arm-back" /><i className="arm-face arm-left" /><i className="arm-face arm-right" /><i className="arm-face arm-top" /><i className="arm-face arm-bottom" /></span>
+      <SwordTexture item={item} held />
+    </span>
+    {preview && <small>FIRST-PERSON VIEW · 第一人称持握预览</small>}
+  </div>;
+}
+
+function GearSprite({ item, size = 64 }: { item: GearItem; size?: number }) {
+  const base = item.kind === "weapon" ? WEAPONS[item.baseId as WeaponId] : ARMORS[item.baseId as ArmorId];
+  return <span className={`gear-sprite ${item.enchantment ? "enchanted" : ""}`} style={{ width: size, height: size }}>
+    {item.kind === "weapon" && item.baseId !== "fist" ? <SwordTexture item={item} /> : base.itemId ? <Sprite id={base.itemId} size={size} /> : <span className={item.kind === "weapon" ? "fist-icon" : "no-armor-icon"}>{item.kind === "weapon" ? "✊" : "◇"}</span>}
+    {item.enchantment && <i className="enchant-glint" />}
+  </span>;
+}
+
+function gearDescription(item: GearItem) {
+  const source = item.source === "starter" ? "初始装备" : item.source === "mission" ? "任务清单奖励" : "怪物战利品";
+  if (!item.enchantment) return source;
+  return `${source} · ${item.enchantment.zh} ${romanLevel(item.enchantment.level)}`;
+}
+
+function BattleView({ onExit }: { onExit: () => void }) {
+  type ActiveQuestion = Omit<BattleQuestion, "options"> & { options: string[] };
+  type Feedback = { ok: boolean; title: string; text: string };
+  const initialProgress = useMemo(() => readSavedProgress(), []);
+  const unlockedTier = Math.min(5, Math.max(1, initialProgress.unlockedTier ?? 1)) as Tier;
+  const missionCount = completedMissionCount(initialProgress);
+  const maxPlayerHp = 60 + missionCount * 10;
+  const [inventory, setInventory] = useState<GearItem[]>(() => ensureMissionGear(unlockedTier, initialProgress.gearInventory ?? []));
+  const [weaponUid, setWeaponUid] = useState(initialProgress.equippedWeapon ?? STARTER_WEAPON.uid);
+  const [armorUid, setArmorUid] = useState(initialProgress.equippedArmor ?? STARTER_ARMOR.uid);
+  const [phase, setPhase] = useState<"select" | "loadout" | "battle" | "won" | "lost">("select");
+  const [monster, setMonster] = useState<MonsterConfig | null>(null);
+  const [questions, setQuestions] = useState<ActiveQuestion[]>([]);
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [monsterHp, setMonsterHp] = useState(0);
+  const [playerHp, setPlayerHp] = useState(maxPlayerHp);
+  const [animation, setAnimation] = useState<CombatAnimation>("idle");
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
+  const [wrongCount, setWrongCount] = useState(0);
+  const [crystals, setCrystals] = useState(0);
+  const [loot, setLoot] = useState<GearItem | null>(null);
+  const [screenHit, setScreenHit] = useState(false);
+
+  const weaponItems = useMemo(() => [STARTER_WEAPON, ...inventory.filter((item) => item.kind === "weapon")], [inventory]);
+  const armorItems = useMemo(() => [STARTER_ARMOR, ...inventory.filter((item) => item.kind === "armor")], [inventory]);
+  const weapon = weaponItems.find((item) => item.uid === weaponUid) ?? STARTER_WEAPON;
+  const armor = armorItems.find((item) => item.uid === armorUid) ?? STARTER_ARMOR;
+  const playerDamage = weaponQuestionDamage(weapon);
+  const damageReduction = armorDamageReduction(armor);
+  const question = questions[questionIndex];
+
+  useEffect(() => {
+    writeSavedProgress({ gearInventory: inventory, equippedWeapon: weapon.uid, equippedArmor: armor.uid });
+  }, [inventory, weapon.uid, armor.uid]);
+
+  function chooseMonster(next: MonsterConfig) {
+    if (next.tier > unlockedTier) return;
+    setMonster(next);
+    setLoot(null);
+    setPhase("loadout");
+  }
+
+  function questionTotalFor(target: MonsterConfig) {
+    const crystalHits = target.id === "ender_dragon" ? 3 : 0;
+    const hits = Math.ceil(target.hp / playerDamage) + crystalHits;
+    const missAllowance = target.id === "creeper" ? 2 : Math.min(5, Math.max(2, Math.floor(maxPlayerHp / Math.max(1, target.attackDamage))));
+    return hits + missAllowance + Math.floor(Math.random() * 3);
+  }
+
+  function buildQuestions(target: MonsterConfig, count: number) {
+    const lowest = Math.max(1, target.tier - 1);
+    const pool = BATTLE_QUESTIONS.filter((item) => item.level >= lowest && item.level <= target.tier);
+    const result: ActiveQuestion[] = [];
+    while (result.length < count) {
+      for (const item of shuffled(pool)) {
+        if (result.length >= count) break;
+        result.push({ ...item, id: `${item.id}-${result.length}`, options: shuffled([...item.options]) });
+      }
+    }
+    return result;
+  }
+
+  function beginBattle() {
+    if (!monster) return;
+    const total = questionTotalFor(monster);
+    setQuestions(buildQuestions(monster, total));
+    setQuestionIndex(0);
+    setMonsterHp(monster.hp);
+    setPlayerHp(maxPlayerHp);
+    setWrongCount(0);
+    setCrystals(monster.id === "ender_dragon" ? 3 : 0);
+    setFeedback(null);
+    setSelectedAnswer(null);
+    setAnimation("idle");
+    setPhase("battle");
+  }
+
+  function completeVictory(target: MonsterConfig) {
+    const drop = rollMonsterDrop(target);
+    setLoot(drop);
+    setInventory((items) => [...items, drop]);
+    const latest = readSavedProgress();
+    const wins = { ...(latest.battleWins ?? {}), [target.id]: (latest.battleWins?.[target.id] ?? 0) + 1 };
+    writeSavedProgress({ xp: (latest.xp ?? 0) + target.reward, battleWins: wins, gearInventory: [...inventory, drop] });
+    playBattleSound("loot", target.id);
+    setPhase("won");
+  }
+
+  function clearProgressAfterDeath() {
+    const latest = readSavedProgress();
+    const missionIds = new Set(allMissionRecipeIds());
+    writeSavedProgress({
+      completed: (latest.completed ?? []).filter((id) => !missionIds.has(id)),
+      assessmentPassed: [], unlockedTier: 1, gearInventory: [],
+      equippedWeapon: STARTER_WEAPON.uid, equippedArmor: STARTER_ARMOR.uid,
+    });
+  }
+
+  function loseBattle() {
+    clearProgressAfterDeath();
+    setPlayerHp(0);
+    setPhase("lost");
+  }
+
+  function strikeMonster(currentQuestion: ActiveQuestion) {
+    if (!monster) return;
+    setAnimation("player-attack");
+    playBattleSound("swing", monster.id);
+    window.setTimeout(() => {
+      if (monster.id === "ender_dragon" && crystals > 0) {
+        setCrystals((value) => Math.max(0, value - 1));
+        setAnimation("monster-hurt");
+        playBattleSound("crystal", monster.id);
+        setFeedback({ ok: true, title: "End Crystal destroyed! · 摧毁末影水晶", text: `${currentQuestion.explanation} 这次攻击切断了末影龙的一条治疗光束。` });
+      } else {
+        const nextHp = Math.max(0, monsterHp - playerDamage);
+        setMonsterHp(nextHp);
+        setAnimation(nextHp === 0 ? "dying" : "monster-hurt");
+        playBattleSound(nextHp === 0 ? "mob_death" : "mob_hurt", monster.id);
+        setFeedback({ ok: true, title: `Critical learning hit! · 造成 ${playerDamage} 伤害`, text: currentQuestion.explanation });
+        if (nextHp === 0) window.setTimeout(() => completeVictory(monster), 950);
+      }
+    }, 260);
+  }
+
+  function monsterAttack(currentQuestion: ActiveQuestion) {
+    if (!monster) return;
+    const nextWrong = wrongCount + 1;
+    setWrongCount(nextWrong);
+
+    if (monster.id === "creeper") {
+      setAnimation(nextWrong >= 3 ? "exploding" : "charging");
+      playBattleSound("fuse", monster.id);
+      setFeedback({ ok: false, title: `Fuse ${nextWrong}/3 · 引信正在燃烧`, text: `${currentQuestion.explanation} 苦力怕不会立刻攻击；第三次答错会发生致命爆炸。` });
+      if (nextWrong >= 3) window.setTimeout(() => {
+        playBattleSound("explosion", monster.id);
+        setScreenHit(true);
+        window.setTimeout(() => setScreenHit(false), 520);
+        window.setTimeout(loseBattle, 700);
+      }, 720);
+      return;
+    }
+
+    let rawDamage = monster.attackDamage;
+    let attackTitle = `${monster.name} attacks!`;
+    let sound: BattleSound = "player_hurt";
+    if (monster.id === "skeleton") {
+      sound = "arrow";
+      if ((questionIndex + 1) % 3 === 0) { rawDamage += 9; attackTitle = "Skeleton rapid shot! · 骷髅快速连射"; }
+    }
+    if (monster.id === "enderman") { sound = "teleport"; attackTitle = "Enderman teleports! · 末影人瞬移攻击"; }
+    if (monster.id === "warden" && nextWrong % 2 === 0) { rawDamage += 28; sound = "sonic"; attackTitle = "SONIC BOOM · 监守者声波重击"; }
+    const received = Math.max(1, Math.round(rawDamage * (1 - damageReduction)));
+    const nextHp = Math.max(0, playerHp - received);
+    setPlayerHp(nextHp);
+    setAnimation(monster.id === "enderman" ? "teleporting" : "monster-attack");
+    setScreenHit(true);
+    playBattleSound(sound, monster.id);
+    if (sound !== "player_hurt") window.setTimeout(() => playBattleSound("player_hurt", monster.id), 150);
+    window.setTimeout(() => setScreenHit(false), 380);
+    if (monster.id === "ender_dragon" && crystals > 0) setMonsterHp((value) => Math.min(monster.hp, value + 15));
+    setFeedback({ ok: false, title: `${attackTitle} · -${received} HP`, text: `${currentQuestion.explanation}${monster.id === "ender_dragon" && crystals > 0 ? " 末影水晶仍在，末影龙恢复了 15 HP。" : ""}` });
+    if (nextHp === 0) window.setTimeout(loseBattle, 780);
+  }
+
+  function answerQuestion(option: string) {
+    if (!question || !monster || feedback) return;
+    setSelectedAnswer(option);
+    if (option === question.answer) strikeMonster(question);
+    else monsterAttack(question);
+  }
+
+  function nextTurn() {
+    if (!monster || monsterHp <= 0 || phase !== "battle") return;
+    if (questionIndex + 1 >= questions.length) {
+      setFeedback({ ok: false, title: "No turns left · 回合已用尽", text: "怪物仍有生命值，它发动了终结攻击。下一次可以装备更强的武器，减少所需正确题数。" });
+      setAnimation("monster-attack");
+      playBattleSound(monster.id === "warden" ? "sonic" : "player_hurt", monster.id);
+      window.setTimeout(loseBattle, 850);
+      return;
+    }
+    setQuestionIndex((value) => value + 1);
+    if (monster.id === "enderman" && !feedback?.ok) {
+      setQuestions((items) => items.map((item, index) => index === questionIndex + 1 ? { ...item, options: shuffled(item.options) } : item));
+    }
+    setFeedback(null);
+    setSelectedAnswer(null);
+    setAnimation("idle");
+  }
+
+  if (phase === "select") return <main className="battle-hub">
+    <header className="battle-topbar"><button onClick={onExit}>← 返回首页</button><div><small>TURN-BASED ENGLISH COMBAT</small><b>Mob Arena · 怪物英语竞技场</b></div><span>Tier {unlockedTier}</span></header>
+    <section className="battle-profile">
+      <div><small>PLAYER LIFE · 玩家生命</small><b>{maxPlayerHp} HP</b><p>基础 60 HP + 已通过任务考核 {missionCount} × 10 HP</p></div>
+      <div><small>GEAR VAULT · 装备仓库</small><b>{inventory.length} 件</b><p>任务奖励低概率弱附魔；Boss 更容易掉落高级附魔。</p></div>
+    </section>
+    <section className="monster-select-head"><small>SELECT A CHALLENGE</small><h1>选择怪物或 Boss</h1><p>怪物生命越高，需要的题目越多。先选择对手，再配置武器和整套盔甲。</p></section>
+    <section className="monster-grid">
+      {MONSTERS.map((item) => {
+        const locked = item.tier > unlockedTier;
+        return <article key={item.id} className={`monster-card arena-${item.arena} ${locked ? "locked" : ""}`}>
+          <div className="monster-preview"><MonsterModel id={item.id} compact /></div>
+          <div className="monster-card-title"><span>{item.kind === "boss" ? "BOSS" : `TIER ${item.tier}`}</span><h2>{item.name}</h2><b>{item.zh}</b></div>
+          <div className="monster-card-stats"><span>♥ {item.hp} HP</span><span>✦ {item.reward} XP</span></div>
+          <p>{item.mechanic}</p>
+          <button disabled={locked} onClick={() => chooseMonster(item)}>{locked ? `🔒 需要 Tier ${item.tier}` : "选择挑战 →"}</button>
+        </article>;
+      })}
+    </section>
+    <p className="battle-disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+  </main>;
+
+  if (phase === "loadout" && monster) {
+    const estimated = Math.ceil(monster.hp / playerDamage) + (monster.id === "ender_dragon" ? 3 : 0);
+    return <main className={`loadout-view arena-${monster.arena}`}>
+      <header className="battle-topbar"><button onClick={() => setPhase("select")}>← 重选怪物</button><div><small>EQUIPMENT LOADOUT</small><b>准备对战 · {monster.name}</b></div><span>{maxPlayerHp} HP</span></header>
+      <div className="loadout-shell">
+        <aside className="loadout-enemy"><small>YOUR OPPONENT</small><div className="loadout-monster"><MonsterModel id={monster.id} compact /></div><h1>{monster.name}</h1><p>{monster.zh} · {monster.hp} HP</p><div className="mechanic-note"><b>SPECIAL MECHANIC</b>{monster.mechanic}</div></aside>
+        <section className="loadout-inventory">
+          <div className="loadout-section-title"><span>01</span><div><small>SELECT WEAPON</small><h2>装备武器</h2></div></div>
+          <div className="gear-list">{weaponItems.map((item) => {
+            const base = WEAPONS[item.baseId as WeaponId];
+            return <button key={item.uid} className={`${weapon.uid === item.uid ? "selected" : ""} ${item.enchantment ? "enchanted" : ""}`} onClick={() => setWeaponUid(item.uid)}>
+              <GearSprite item={item} size={54} /><span><b>{gearName(item)}</b><small>{gearDescription(item)}</small></span><strong>⚔ {base.attack}</strong>
+            </button>;
+          })}</div>
+          <div className="loadout-section-title"><span>02</span><div><small>SELECT FULL ARMOR SET</small><h2>装备整套盔甲</h2></div></div>
+          <div className="gear-list armor-list">{armorItems.map((item) => {
+            const base = ARMORS[item.baseId as ArmorId];
+            return <button key={item.uid} className={`${armor.uid === item.uid ? "selected" : ""} ${item.enchantment ? "enchanted" : ""}`} onClick={() => setArmorUid(item.uid)}>
+              <GearSprite item={item} size={54} /><span><b>{gearName(item)}</b><small>{gearDescription(item)}</small></span><strong>◆ {base.armor}</strong>
+            </button>;
+          })}</div>
+        </section>
+        <aside className="loadout-summary">
+          <small>FINAL STATS</small><h2>战斗属性</h2>
+          <FirstPersonWeapon item={weapon} preview />
+          <div><span>玩家生命</span><b>{maxPlayerHp} HP</b></div><div><span>每次答对伤害</span><b>{playerDamage}</b></div><div><span>护甲减伤</span><b>{Math.round(damageReduction * 100)}%</b></div><div><span>击败所需正确题</span><b>约 {estimated} 题</b></div>
+          <p>实际总题数还会加入可容错回合，并在进入战斗时随机抽取。</p>
+          <button onClick={beginBattle}>⚔ 装备完成 · 开始战斗</button>
+        </aside>
+      </div>
+    </main>;
+  }
+
+  if ((phase === "won" || phase === "lost") && monster) return <main className={`battle-result-view ${phase} arena-${monster.arena}`}>
+    <div className="battle-result-card">
+      <span className="result-icon">{phase === "won" ? "✦" : "☠"}</span><small>{phase === "won" ? "VICTORY" : "YOU DIED"}</small><h1>{phase === "won" ? `${monster.name} defeated!` : "任务清单已清零"}</h1>
+      {phase === "won" && loot ? <><p>获得 {monster.reward} XP，并从怪物战利品箱中发现：</p><div className={`loot-drop ${loot.enchantment ? "enchanted" : ""}`}><GearSprite item={loot} size={82} /><div><small>NEW DROP</small><b>{gearName(loot)}</b><p>{gearDescription(loot)}</p></div></div></> : <p>你失去了本轮装备；所有阶级任务考核与任务物品进度已重置。回到首页后将重新从拳头开始。</p>}
+      <div className="result-actions"><button onClick={phase === "won" ? () => setPhase("select") : onExit}>{phase === "won" ? "继续挑战 →" : "Respawn · 返回首页"}</button><button onClick={onExit}>返回首页</button></div>
+    </div>
+  </main>;
+
+  if (!monster || !question) return null;
+  const monsterHpPercent = Math.max(0, monsterHp / monster.hp * 100);
+  const playerHpPercent = Math.max(0, playerHp / maxPlayerHp * 100);
+  return <main className={`battle-view arena-${monster.arena} ${screenHit ? "screen-hit" : ""}`}>
+    <header className="battle-topbar combat"><button onClick={() => setPhase("select")}>← 逃离战斗</button><div><small>TURN {questionIndex + 1} / {questions.length}</small><b>{monster.name} · {monster.zh}</b></div><span>难度 Tier {monster.tier}</span></header>
+    <div className="battlefield">
+      <div className="boss-bar"><div><small>{monster.kind === "boss" ? "BOSS" : "HOSTILE MOB"}</small><b>{monster.name}</b></div><span><i style={{ width: `${monsterHpPercent}%` }} /></span><strong>{monsterHp}/{monster.hp}</strong></div>
+      <div className="battle-arena-scene"><div className="arena-sky" /><div className="arena-ground" />{monster.id === "ender_dragon" && <div className="end-crystals">{[0,1,2].map((index) => <i key={index} className={index < crystals ? "active" : "broken"}>◆</i>)}</div>}<div className="monster-stage"><MonsterModel id={monster.id} animation={animation} /></div><FirstPersonWeapon item={weapon} swinging={animation === "player-attack"} /></div>
+      <section className="combat-panel">
+        <div className="player-status"><div><small>PLAYER · 任务生命 +{missionCount * 10}</small><b>{Array.from({ length: Math.ceil(maxPlayerHp / 10) }, (_, index) => <i key={index} className={index < Math.ceil(playerHp / 10) ? "full" : "empty"}>♥</i>)}</b></div><span><i style={{ width: `${playerHpPercent}%` }} /></span><strong>{playerHp}/{maxPlayerHp} HP</strong></div>
+        <div className="combat-question-head"><div><small>{question.category.toUpperCase()} · LEVEL {question.level}</small><h2>{question.prompt}</h2><p>{question.meaning}</p></div><button onClick={() => speak(question.prompt)}>🔊 朗读</button></div>
+        <div className="combat-options">{question.options.map((option, index) => <button key={`${question.id}-${option}`} disabled={Boolean(feedback)} className={`${selectedAnswer === option ? "chosen" : ""} ${feedback && option === question.answer ? "correct" : ""} ${feedback && selectedAnswer === option && option !== question.answer ? "wrong" : ""}`} onClick={() => answerQuestion(option)}><span>{String.fromCharCode(65 + index)}</span><b>{option}</b></button>)}</div>
+        {monster.id === "creeper" && <div className="fuse-meter"><span>TNT FUSE · 引信</span><b>{[0,1,2].map((index) => <i key={index} className={index < wrongCount ? "lit" : ""}>▣</i>)}</b><strong>{wrongCount}/3</strong></div>}
+        {monster.id === "warden" && <div className="vibration-meter"><span>SCULK VIBRATION · 振动警戒</span><b>{wrongCount % 2 ? "▮▯" : "▯▯"}</b><strong>每 2 次错误触发声波</strong></div>}
+        {feedback && <div className={`combat-feedback ${feedback.ok ? "correct" : "wrong"}`}><span>{feedback.ok ? "✓" : "!"}</span><div><b>{feedback.title}</b><p>{feedback.text}</p></div>{phase === "battle" && monsterHp > 0 && playerHp > 0 && animation !== "exploding" && <button onClick={nextTurn}>下一回合 →</button>}</div>}
+      </section>
+    </div>
+    <div className="damage-overlay" /><p className="battle-disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+  </main>;
+}
+
+function CraftingView({ onBack, onBattle }: { onBack: () => void; onBattle: () => void }) {
   const [selectedId, setSelectedId] = useState("crafting_table");
   const [category, setCategory] = useState<Category>("all");
   const [query, setQuery] = useState("");
@@ -679,7 +1105,7 @@ function CraftingView({ onBack }: { onBack: () => void }) {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ xp, craftCount, completed, unlockedTier, assessmentPassed }));
+    writeSavedProgress({ xp, craftCount, completed, unlockedTier, assessmentPassed });
   }, [xp, craftCount, completed, unlockedTier, assessmentPassed]);
 
   useEffect(() => {
@@ -734,6 +1160,9 @@ function CraftingView({ onBack }: { onBack: () => void }) {
       const currentTasks = TIER_TASKS[unlockedTier as 1 | 2 | 3 | 4].map(recipeForResult).filter((item): item is Recipe => Boolean(item));
       if (currentTasks.every((item) => nextPassed.includes(item.id))) {
         const nextTier = (unlockedTier + 1) as Tier;
+        const saved = readSavedProgress();
+        const gearInventory = ensureMissionGear(nextTier, saved.gearInventory ?? []);
+        writeSavedProgress({ gearInventory });
         setUnlockedTier(nextTier);
         setUnlockNotice(nextTier);
       }
@@ -749,7 +1178,7 @@ function CraftingView({ onBack }: { onBack: () => void }) {
       <header className="craft-topbar">
         <button onClick={onBack}>← <span>Back to World</span></button>
         <div><b>Crafting Table</b><small>工作台 · {catalog.version}</small></div>
-        <div className="craft-stats"><button onClick={() => setShowStats((value) => !value)}>📗 {completed.length}/{catalog.totalRecipes}</button><span>✦ {xp} XP</span><b>LV.{currentLevel}</b></div>
+        <div className="craft-stats"><button onClick={onBattle}>⚔ Battle</button><button onClick={() => setShowStats((value) => !value)}>📗 {completed.length}/{catalog.totalRecipes}</button><span>✦ {xp} XP</span><b>LV.{currentLevel}</b></div>
       </header>
 
       {showStats && <section className="stats-window">
@@ -798,7 +1227,7 @@ function CraftingView({ onBack }: { onBack: () => void }) {
         </aside>
       </div>}
 
-      {unlockNotice && <div className="unlock-layer" role="dialog" aria-modal="true" aria-label="新制作阶级已解锁"><div className="unlock-modal" style={{ "--tier-color": TIER_INFO[unlockNotice - 1].color } as CSSProperties}><span>✦</span><small>NEW CRAFTING TIER UNLOCKED</small><h2>Tier {unlockNotice}: {TIER_INFO[unlockNotice - 1].name}</h2><p>{TIER_INFO[unlockNotice - 1].zh} · {TIER_INFO[unlockNotice - 1].description}</p><button onClick={() => setUnlockNotice(null)}>进入新阶级 →</button></div></div>}
+      {unlockNotice && <div className="unlock-layer" role="dialog" aria-modal="true" aria-label="新制作阶级已解锁"><div className="unlock-modal" style={{ "--tier-color": TIER_INFO[unlockNotice - 1].color } as CSSProperties}><span>✦</span><small>NEW CRAFTING TIER UNLOCKED</small><h2>Tier {unlockNotice}: {TIER_INFO[unlockNotice - 1].name}</h2><p>{TIER_INFO[unlockNotice - 1].zh} · {TIER_INFO[unlockNotice - 1].description}</p><div className="unlock-gear-note">⚔ 已获得新的剑与整套盔甲<br />有小概率附带 I–II 级弱附魔，可在怪物竞技场中装备。</div><button onClick={() => setUnlockNotice(null)}>领取装备并进入新阶级 →</button></div></div>}
 
       <p className="craft-disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
     </main>
@@ -806,6 +1235,8 @@ function CraftingView({ onBack }: { onBack: () => void }) {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<"world" | "crafting">("world");
-  return screen === "world" ? <WorldView onOpen={() => setScreen("crafting")} /> : <CraftingView onBack={() => setScreen("world")} />;
+  const [screen, setScreen] = useState<"world" | "crafting" | "battle">("world");
+  if (screen === "world") return <WorldView onOpen={() => setScreen("crafting")} onBattle={() => setScreen("battle")} />;
+  if (screen === "battle") return <BattleView onExit={() => setScreen("world")} />;
+  return <CraftingView onBack={() => setScreen("world")} onBattle={() => setScreen("battle")} />;
 }

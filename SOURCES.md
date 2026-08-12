@@ -22,6 +22,10 @@ The generated catalog contains the 1,120 recipe JSON files whose recipe types ar
 
 `public/mc/item-atlas-26.2.png` is a compact, generated atlas containing only textures needed by this website. The workbench GUI, block textures and arm crop are also extracted from the verified 26.2 client resources. The source jars themselves are not committed.
 
+The battle screen uses the six corresponding vanilla entity texture maps (Zombie, Skeleton, Creeper, Enderman, Warden and Ender Dragon). The textures and the five sword/bow item sprites were retrieved through the MIT-licensed `minecraft-assets` 1.17.0 package from its Minecraft 1.21.8 resource snapshot; Mojang retains ownership of the underlying Minecraft artwork.
+
+The entity cube dimensions, bone hierarchy and UV coordinates come from Mojang's public [`bedrock-samples`](https://github.com/Mojang/bedrock-samples) vanilla resource pack (`resource_pack/models/entity`). They are normalized into `src/data/mobModels.ts` and rendered as textured CSS 3D cuboids, so the site uses the original model proportions without requiring WebGL. Battle sounds are generated locally with the Web Audio API and do not redistribute Mojang audio files.
+
 ## Reproduction
 
 `scripts/generate_minecraft_catalog.py` parses the official recipe registry, item tags, English language table, Simplified Chinese language asset, item definitions and texture models. It generates:
