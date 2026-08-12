@@ -67,14 +67,15 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fff36e; outline-
 .quest-toast small { margin-top: 3px; color: #b8b8b8; font-size: 10px; }
 @keyframes toast-in { from { transform: translateX(120%); } }
 
-.world-table { position: absolute; left: 50%; bottom: 19%; width: clamp(180px,20vw,270px); aspect-ratio: 1 / 1.04; transform: translateX(-50%); border: 0; background: transparent; padding: 0; cursor: crosshair; }
+.world-table { position: absolute; left: 50%; bottom: 18.5%; width: clamp(180px,20vw,270px); aspect-ratio: 1; transform: translateX(-50%); border: 0; background: transparent; padding: 0; cursor: crosshair; }
 .world-table:hover .cube-body { filter: brightness(1.08); }
-.cube-body { position: absolute; z-index: 1; inset: 0; display: block; transition: filter .12s linear; filter: drop-shadow(8px 12px 5px rgba(18,30,12,.24)); }
-.cube-face { position: absolute; display: block; image-rendering: pixelated; background-repeat: no-repeat; background-size: 100% 100%; background-position: center; transform: none; backface-visibility: visible; }
-.cube-top { z-index: 3; left: 5%; top: 2%; width: 90%; height: 46%; background-image: url("/mc/crafting-table-top.png"); clip-path: polygon(50% 0,100% 50%,50% 100%,0 50%); filter: brightness(1.07); }
-.cube-front { z-index: 2; left: 50%; top: 25%; width: 45%; height: 71%; background-image: url("/mc/crafting-table-front.png"); clip-path: polygon(0 32.4%,100% 0,100% 67.6%,0 100%); }
-.cube-side { z-index: 1; left: 5%; top: 25%; width: 45%; height: 71%; background-image: url("/mc/crafting-table-side.png"); clip-path: polygon(0 0,100% 32.4%,100% 100%,0 67.6%); filter: brightness(.76); }
-.cube-shadow { position: absolute; z-index: 0; left: 43%; bottom: -2%; width: 92%; height: 21%; transform: translateX(-50%) skewX(-18deg); border-radius: 50%; background: rgba(24,38,17,.45); box-shadow: -18px 3px 10px rgba(24,38,17,.22); filter: blur(7px); pointer-events: none; }
+.cube-body { position: absolute; z-index: 1; inset: 0; display: block; transition: filter .12s linear; filter: drop-shadow(8px 12px 5px rgba(18,30,12,.27)); }
+.cube-model { display: block; width: 100%; height: 100%; overflow: visible; image-rendering: pixelated; }
+.cube-face { image-rendering: pixelated; }
+.cube-side-shade { fill: rgba(22,13,6,.24); pointer-events: none; }
+.cube-top-light { fill: rgba(255,210,143,.055); pointer-events: none; }
+.cube-edges { fill: none; stroke: rgba(39,20,8,.82); stroke-width: 3; stroke-linejoin: bevel; vector-effect: non-scaling-stroke; pointer-events: none; }
+.cube-shadow { position: absolute; z-index: 0; left: 46%; bottom: -1%; width: 88%; height: 15%; transform: translateX(-50%) skewX(-20deg); border-radius: 50%; background: rgba(24,38,17,.43); box-shadow: -22px 4px 13px rgba(24,38,17,.2); filter: blur(7px); pointer-events: none; }
 .target-label { position: absolute; z-index: 5; left: 50%; top: -30px; transform: translateX(-50%); min-width: 145px; padding: 6px 10px; font: normal 11px/1 monospace; color: #fff; text-shadow: 2px 2px #000; background: rgba(0,0,0,.62); border: 1px solid rgba(255,255,255,.5); pointer-events: none; }
 .target-label small { display: block; margin-top: 4px; color: #ffe66c; font-size: 9px; }
 .world-table.was-hit .cube-body { animation: table-flash .16s steps(2,end) 2 alternate; }
@@ -91,10 +92,16 @@ button:focus-visible, input:focus-visible { outline: 3px solid #fff36e; outline-
 .crosshair i { position: absolute; display: block; background: #fff; }
 .crosshair i:first-child { left: 10px; top: 0; width: 4px; height: 24px; }
 .crosshair i:last-child { left: 0; top: 10px; width: 24px; height: 4px; }
-.player-arm { position: absolute; right: -25px; bottom: -40px; width: clamp(150px,19vw,260px); height: clamp(450px,57vw,780px); transform: rotate(-20deg); transform-origin: 65% 100%; filter: drop-shadow(-18px 16px 12px rgba(0,0,0,.25)); pointer-events: none; }
+.player-arm { position: absolute; right: -25px; bottom: -40px; width: clamp(150px,19vw,260px); height: clamp(450px,57vw,780px); transform: rotate(-20deg); transform-origin: 65% 100%; filter: drop-shadow(-18px 16px 12px rgba(0,0,0,.25)); pointer-events: none; will-change: transform; }
 .player-arm::before { content: ""; position: absolute; inset: 0; background: url("/mc/steve-arm.png") center/100% 100% no-repeat; image-rendering: pixelated; transform: scaleY(-1); }
-.player-arm.swing { animation: hand-swing .58s cubic-bezier(.45,.03,.48,1); }
-@keyframes hand-swing { 0% { transform: rotate(-20deg) translate(0); } 38% { transform: rotate(49deg) translate(-23vw,-15vh) scale(.86); } 67% { transform: rotate(22deg) translate(-15vw,-8vh) scale(.92); } 100% { transform: rotate(-20deg) translate(0); } }
+.player-arm.swing { animation: hand-swing .58s cubic-bezier(.42,0,.35,1); }
+@keyframes hand-swing {
+  0% { transform: rotate(-20deg) translate(0); }
+  18% { transform: rotate(-5deg) translate(0,-1vh); }
+  58% { transform: rotate(-58deg) translate(-1vw,1.2vh) scale(.95); }
+  76% { transform: rotate(-43deg) translate(-.5vw,.5vh) scale(.97); }
+  100% { transform: rotate(-20deg) translate(0); }
+}
 .survival-hud { position: absolute; left: 50%; bottom: 2.7%; width: min(560px,73vw); transform: translateX(-50%); }
 .bars { display: flex; justify-content: space-between; padding: 0 4px 5px; color: #e52020; text-shadow: 2px 2px 0 #300; font-size: 19px; letter-spacing: -1px; }
 .hunger { color: #c56b2e; text-shadow: 2px 2px #401e08; transform: rotate(2deg); }
