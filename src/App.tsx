@@ -1066,7 +1066,7 @@ function CraftingView({ onBack, onBattle }: { onBack: () => void; onBattle: () =
   const [selectedId, setSelectedId] = useState("crafting_table");
   const [category, setCategory] = useState<Category>("all");
   const [query, setQuery] = useState("");
-  const [bookOpen, setBookOpen] = useState(true);
+  const [bookOpen, setBookOpen] = useState(false);
   const [visibleLimit, setVisibleLimit] = useState(96);
   const [grid, setGrid] = useState<(string | null)[]>(Array(9).fill(null));
   const [xp, setXp] = useState(0);
@@ -1107,6 +1107,16 @@ function CraftingView({ onBack, onBattle }: { onBack: () => void; onBattle: () =
   useEffect(() => {
     writeSavedProgress({ xp, craftCount, completed, unlockedTier, assessmentPassed });
   }, [xp, craftCount, completed, unlockedTier, assessmentPassed]);
+
+  useEffect(() => {
+    if (assessmentRecipe) return;
+    document.documentElement.classList.add("crafting-page-locked");
+    document.body.classList.add("crafting-page-locked");
+    return () => {
+      document.documentElement.classList.remove("crafting-page-locked");
+      document.body.classList.remove("crafting-page-locked");
+    };
+  }, [assessmentRecipe]);
 
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
@@ -1191,23 +1201,25 @@ function CraftingView({ onBack, onBattle }: { onBack: () => void; onBattle: () =
         <small>所有进度只保存在当前设备。</small>
       </section>}
 
-      <div className={`craft-workspace ${bookOpen ? "book-visible" : ""}`}>
-        {bookOpen && <RecipeBook
-          recipes={filtered} selected={selected} category={category} query={query} visibleLimit={visibleLimit} unlockedTier={unlockedTier}
-          onSelect={selectRecipe} onCategory={(next) => { setCategory(next); setVisibleLimit(96); }}
-          onQuery={(next) => { setQuery(next); setVisibleLimit(96); }} onMore={() => setVisibleLimit((value) => value + 96)}
-          onClose={() => setBookOpen(false)}
-        />}
-        <CraftingGui
-          recipe={selected} matchedRecipe={matchedRecipe} grid={grid} onDropMaterial={dropMaterial}
-          onRemove={(index) => setGrid((current) => current.map((item, itemIndex) => itemIndex === index ? null : item))}
-          onClear={() => setGrid(Array(9).fill(null))}
-          onCraft={craftItem} onOpenBook={() => setBookOpen((value) => !value)} bookOpen={bookOpen} craftedPulse={craftedPulse}
-        />
-        <EnglishPanel recipe={displayRecipe} completed={completed.includes(displayRecipe.id)} onFumi={() => setFumiOpen(true)} />
-      </div>
+      <div className="craft-screen-layout">
+        <div className={`craft-workspace ${bookOpen ? "book-visible" : ""}`}>
+          {bookOpen && <RecipeBook
+            recipes={filtered} selected={selected} category={category} query={query} visibleLimit={visibleLimit} unlockedTier={unlockedTier}
+            onSelect={selectRecipe} onCategory={(next) => { setCategory(next); setVisibleLimit(96); }}
+            onQuery={(next) => { setQuery(next); setVisibleLimit(96); }} onMore={() => setVisibleLimit((value) => value + 96)}
+            onClose={() => setBookOpen(false)}
+          />}
+          <CraftingGui
+            recipe={selected} matchedRecipe={matchedRecipe} grid={grid} onDropMaterial={dropMaterial}
+            onRemove={(index) => setGrid((current) => current.map((item, itemIndex) => itemIndex === index ? null : item))}
+            onClear={() => setGrid(Array(9).fill(null))}
+            onCraft={craftItem} onOpenBook={() => setBookOpen((value) => !value)} bookOpen={bookOpen} craftedPulse={craftedPulse}
+          />
+          <EnglishPanel recipe={displayRecipe} completed={completed.includes(displayRecipe.id)} onFumi={() => setFumiOpen(true)} />
+        </div>
 
-      <ProgressionPanel unlockedTier={unlockedTier} completed={completed} assessmentPassed={assessmentPassed} onSelect={(recipe) => { selectRecipe(recipe); window.scrollTo({ top: 0, behavior: "smooth" }); }} onAssessment={setAssessmentRecipe} />
+        <ProgressionPanel unlockedTier={unlockedTier} completed={completed} assessmentPassed={assessmentPassed} onSelect={selectRecipe} onAssessment={setAssessmentRecipe} />
+      </div>
 
       <div className="catalog-proof">
         <span>OFFICIAL DATA PACK 107.1</span>
