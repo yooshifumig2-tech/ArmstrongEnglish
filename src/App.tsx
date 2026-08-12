@@ -547,13 +547,14 @@ function AssessmentView({ recipe, onBack, onComplete }: { recipe: Recipe; onBack
   const [dragWord, setDragWord] = useState<DragWord | null>(null);
   const dragRef = useRef<DragWord | null>(null);
   const item = recipe.result.name.toLowerCase();
+  const itemZh = recipe.result.zh || "这个物品";
   const itemWords = item.split(" ");
   const mode = recipe.result.id.length % 3;
   const sentence = useMemo(() => {
-    if (mode === 0) return { words: ["Yesterday,", "I", "crafted", articleFor(item), ...itemWords, "because", "I", "needed", "it."], rule: "Yesterday 表示过去，动词要用过去式 crafted；because 引导原因从句。" };
-    if (mode === 1) return { words: ["I", "use", "two", ...pluralizeItem(item).split(" "), "when", "I", "explore", "a", "cave."], rule: "two 后面的可数名词要用复数；when 引导时间从句，描述经常发生的事用一般现在时。" };
-    return { words: ["Tomorrow,", "I", "will", "craft", articleFor(item), ...itemWords, "before", "I", "explore", "the", "cave."], rule: "Tomorrow 表示将来，使用 will + 动词原形；before 引导时间从句。" };
-  }, [item, mode]);
+    if (mode === 0) return { words: ["Yesterday,", "I", "crafted", articleFor(item), ...itemWords, "because", "I", "needed", "it."], meaning: `昨天，我合成了一个${itemZh}，因为我需要它。`, rule: "Yesterday 表示过去，动词要用过去式 crafted；because 引导原因从句。" };
+    if (mode === 1) return { words: ["I", "use", "two", ...pluralizeItem(item).split(" "), "when", "I", "explore", "a", "cave."], meaning: `当我探索洞穴时，我会使用两个${itemZh}。`, rule: "two 后面的可数名词要用复数；when 引导时间从句，描述经常发生的事用一般现在时。" };
+    return { words: ["Tomorrow,", "I", "will", "craft", articleFor(item), ...itemWords, "before", "I", "explore", "the", "cave."], meaning: `明天，我会在探索洞穴之前合成一个${itemZh}。`, rule: "Tomorrow 表示将来，使用 will + 动词原形；before 引导时间从句。" };
+  }, [item, itemZh, mode]);
   const bank = useMemo(() => {
     const distractors = mode === 0 ? ["craft", "crafts"] : mode === 1 ? [item, "uses"] : ["crafted", "crafts"];
     return [...sentence.words, ...distractors].map((text, id) => ({ id, text })).sort((a, b) => {
@@ -611,6 +612,7 @@ function AssessmentView({ recipe, onBack, onComplete }: { recipe: Recipe; onBack
         {question === 0 && <>
           <div className="question-label"><span>01</span><div><small>SENTENCE CRAFTING · 拖动造句</small><h2>在游戏情境中组成正确的句子</h2></div></div>
           <p className="question-context">任务：用 <b>{recipe.result.name}</b> 造句，注意时态、单复数和简单从句。把词块拖进下方工作台。</p>
+          <div className="target-meaning"><small>TARGET MEANING · 目标中文句子</small><b>{sentence.meaning}</b></div>
           <div className="sentence-answer">{assembled.length ? assembled.map((word, index) => <button key={`${word.id}-${index}`} onClick={() => !feedback?.ok && setAssembled((words) => words.filter((_, wordIndex) => wordIndex !== index))}>{word.text}</button>) : <span>DROP WORDS HERE · 把词块拖到这里</span>}</div>
           <div className="word-bank">{bank.map((word) => <button key={word.id} disabled={usedIds.has(word.id) || feedback?.ok} onPointerDown={(event) => startWordDrag(event, word)} onPointerMove={moveWordDrag} onPointerUp={finishWordDrag} onPointerCancel={() => { dragRef.current = null; setDragWord(null); }}>{word.text}</button>)}</div>
           {!feedback?.ok && <button className="check-answer" onClick={checkSentence} disabled={!assembled.length}>Check sentence · 检查句子</button>}
